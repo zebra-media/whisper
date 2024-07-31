@@ -150,6 +150,28 @@ extern "C" {
         float vlen;        // voice length of the token
     } whisper_token_data;
 
+    typedef struct whisper_word {
+      // time in us.
+      int64_t start;
+      int64_t end;
+      int prob;  // [0 - 100]
+      const char *text;
+    } whisper_word;
+
+    typedef struct whisper_transcription {
+      // time in us.
+      int64_t start;
+      int64_t end;
+      const char *text;
+      int numberOfWords;
+      whisper_word *words;
+    } whisper_transcription;
+
+    typedef struct whisper_aligment_data {
+      int numberOfTranscriptions;
+      whisper_transcription *transcriptions;
+    } whisper_aligment_data;
+
     typedef struct whisper_model_loader {
         void * context;
 
@@ -227,7 +249,7 @@ extern "C" {
         "use whisper_init_with_params_no_state instead"
     );
 
-    WHISPER_API struct whisper_state * whisper_init_state(struct whisper_context * ctx);
+    WHISPER_API struct whisper_state * whisper_init_state(struct whisper_context * ctx, const char *model_md5);
 
     // Given a context, enable use of OpenVINO for encode inference.
     // model_path: Optional path to OpenVINO encoder IR model. If set to nullptr,
@@ -419,6 +441,8 @@ extern "C" {
     // Performance information from the default state.
     WHISPER_API void whisper_print_timings(struct whisper_context * ctx);
     WHISPER_API void whisper_reset_timings(struct whisper_context * ctx);
+    WHISPER_API void whisper_print_timings_from_state(struct whisper_context * ctx, struct whisper_state * state);
+    WHISPER_API void whisper_reset_timings_from_state(struct whisper_context * ctx, struct whisper_state * state);
 
     // Print system information
     WHISPER_API const char * whisper_print_system_info(void);
@@ -430,6 +454,11 @@ extern "C" {
         WHISPER_SAMPLING_GREEDY,      // similar to OpenAI's GreedyDecoder
         WHISPER_SAMPLING_BEAM_SEARCH, // similar to OpenAI's BeamSearchDecoder
     };
+
+    // Text segment callback
+    // Called on every newly generated text segment
+    // Use the whisper_full_...() functions to obtain the text segments
+    typedef void (*whisper_new_alignment_segment_callback)(struct whisper_context * ctx, struct whisper_state * state, struct whisper_aligment_data* pAligmented, void * user_data);
 
     // Text segment callback
     // Called on every newly generated text segment
@@ -530,6 +559,10 @@ extern "C" {
 
             float patience; // TODO: not implemented, ref: https://arxiv.org/pdf/2204.05424.pdf
         } beam_search;
+
+        // called for every newly alignment text segment.
+        whisper_new_alignment_segment_callback new_alignment_segment_callback;
+        void * new_alignment_segment_callback_user_data;
 
         // called for every newly generated text segment
         whisper_new_segment_callback new_segment_callback;
@@ -649,6 +682,12 @@ extern "C" {
     // Control logging output; default behavior is to print to stderr
 
     WHISPER_API void whisper_log_set(ggml_log_callback log_callback, void * user_data);
+
+    // whisper_preload_from_file.
+    WHISPER_API int  whisper_gpu_preload_from_file(const char * path_model, const char* model_md5);
+    // whisper_gpu_is_compiled_from_file
+    // 1 if compiled, or 0.
+    WHISPER_API int  whisper_gpu_is_compiled_from_file(const char * path_model, const char* model_md5);
 
 #ifdef __cplusplus
 }

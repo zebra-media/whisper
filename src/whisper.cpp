@@ -53,6 +53,8 @@
 #include <random>
 #include <functional>
 #include <codecvt>
+#include <unistd.h>
+
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -3321,25 +3323,36 @@ static std::vector<whisper_vocab::id> tokenize(const whisper_vocab & vocab, cons
 
 #ifdef WHISPER_USE_COREML
 // replace .bin with -encoder.mlmodelc
-static std::string whisper_get_coreml_path_encoder(std::string path_bin) {
-    auto pos = path_bin.rfind('.');
-    if (pos != std::string::npos) {
-        path_bin = path_bin.substr(0, pos);
-    }
+static std::string whisper_get_compiled_coreml_path_encoder(
+    std::string path_bin) {
+  auto pos = path_bin.rfind('.');
+  if (pos != std::string::npos) {
+    path_bin = path_bin.substr(0, pos);
+  }
 
-    // match "-qx_x"
-    pos = path_bin.rfind('-');
-    if (pos != std::string::npos) {
-        auto sub = path_bin.substr(pos);
-        if (sub.size() == 5 && sub[1] == 'q' && sub[3] == '_') {
-            path_bin = path_bin.substr(0, pos);
-        }
-    }
+  path_bin += "-encoder.ml";
 
-    path_bin += "-encoder.mlmodelc";
-
-    return path_bin;
+  return path_bin;
 }
+
+// replace .bin with -encoder.mlpackage
+static std::string whisper_get_coreml_path_encoder(std::string path_bin) {
+  auto pos = path_bin.rfind('.');
+  if (pos != std::string::npos) {
+    path_bin = path_bin.substr(0, pos);
+  }
+
+  path_bin += "-encoder.mlpackage";
+
+  return path_bin;
+}
+
+// replace .bin with -encoder.mlmodelc
+static std::string whisper_get_coreml_path_flag_encoder(
+    std::string compiled_model_path, const char *model_md5) {
+  return compiled_model_path + "/" + model_md5 + ".f";
+}
+
 #endif
 
 #ifdef WHISPER_USE_OPENVINO
@@ -4261,6 +4274,10 @@ whisper_token whisper_token_transcribe(struct whisper_context * ctx) {
 }
 
 void whisper_print_timings(struct whisper_context * ctx) {
+  whisper_print_timings_from_state(ctx, ctx->state);
+}
+
+void whisper_print_timings_from_state(struct whisper_context * ctx, struct whisper_state * state) {
     const int64_t t_end_us = ggml_time_us();
 
     WHISPER_LOG_INFO("\n");
@@ -4285,6 +4302,10 @@ void whisper_print_timings(struct whisper_context * ctx) {
 }
 
 void whisper_reset_timings(struct whisper_context * ctx) {
+  whisper_reset_timings_from_state(ctx, ctx->state);
+}
+
+void whisper_reset_timings_from_state(struct whisper_context * ctx, struct whisper_state * state) {
     ctx->t_start_us = ggml_time_us();
     if (ctx->state != nullptr) {
         ctx->state->t_mel_us = 0;
@@ -4838,6 +4859,10 @@ struct whisper_full_params whisper_full_default_params(enum whisper_sampling_str
 
             /*.patience  =*/ -1.0f,
         },
+
+
+        /*.new_alignment_segment_callback           =*/ nullptr,
+        /*.new_alignment_segment_callback_user_data =*/ nullptr,
 
         /*.new_segment_callback           =*/ nullptr,
         /*.new_segment_callback_user_data =*/ nullptr,
@@ -7464,4 +7489,88 @@ static void whisper_log_callback_default(ggml_log_level level, const char * text
     (void) user_data;
     fputs(text, stderr);
     fflush(stderr);
+}
+
+int whisper_gpu_preload_from_file(const char *path_model,
+                                  const char *model_md5) {
+  if (path_model == nullptr || model_md5 == nullptr) {
+    return -1;
+  }
+#ifdef WHISPER_USE_COREML
+  const auto &compiled_coreml_path_encoder =
+      whisper_get_compiled_coreml_path_encoder(path_model);
+  WHISPER_LOG_INFO("checking Core ML model '%s'",
+                   compiled_coreml_path_encoder.c_str());
+  const auto &coreml_path_flag_encoder = whisper_get_coreml_path_flag_encoder(
+      compiled_coreml_path_encoder, model_md5);
+  if (access(coreml_path_flag_encoder.c_str(), F_OK) == 0) {
+    return 0;
+  }
+
+  const auto coreml_path_encoder = whisper_get_coreml_path_encoder(path_model);
+  if (access(coreml_path_encoder.c_str(), F_OK) != 0) {
+    WHISPER_LOG_ERROR("model file %s is not exists.",
+                      coreml_path_encoder.c_str());
+    return -1;
+  }
+  WHISPER_LOG_INFO("compile Core ML model from '%s' to '%s'",
+                   coreml_path_encoder.c_str(),
+                   compiled_coreml_path_encoder.c_str());
+  const auto res = whisper_coreml_compile(coreml_path_encoder.c_str(),
+                                          compiled_coreml_path_encoder.c_str());
+  if (res != 0) {
+    WHISPER_LOG_ERROR("failed to compile model from %s to %s.",
+                      coreml_path_encoder.c_str(),
+                      compiled_coreml_path_encoder.c_str());
+    return res;
+  }
+
+  WHISPER_LOG_INFO("initilizing Core ML model '%s'",
+                   compiled_coreml_path_encoder.c_str());
+  // it takes very much time.
+  auto ctx_coreml = whisper_coreml_init(compiled_coreml_path_encoder.c_str());
+  if (!ctx_coreml) {
+    WHISPER_LOG_ERROR("failed to initilize Core ML model from '%s'",
+                      compiled_coreml_path_encoder.c_str());
+    return -2;
+  }
+  WHISPER_LOG_INFO("initilized Core ML model '%s'",
+                   compiled_coreml_path_encoder.c_str());
+
+  // touch to create a flag file.
+  FILE *fp = fopen(coreml_path_flag_encoder.c_str(), "wb");
+  if (fp) {
+    fclose(fp);
+  }
+  WHISPER_LOG_INFO("Core ML model loaded %s", coreml_path_flag_encoder.c_str());
+
+  whisper_coreml_free(ctx_coreml);
+#else
+  WHISPER_LOG_INFO("NOT support Core ML model");
+#endif
+  return 0;
+}
+
+int whisper_gpu_is_compiled_from_file(const char *path_model,
+                                      const char *model_md5) {
+  if (path_model == nullptr || model_md5 == nullptr) {
+    return -1;
+  }
+#ifndef WHISPER_USE_COREML
+  return 0;
+#endif
+  const auto &compiled_path_coreml_encoder =
+      whisper_get_compiled_coreml_path_encoder(path_model);
+  WHISPER_LOG_DEBUG("Checking Core ML model from '%s'",
+               compiled_path_coreml_encoder.c_str());
+  const auto &coreml_path_flag_encoder = whisper_get_coreml_path_flag_encoder(
+      compiled_path_coreml_encoder, model_md5);
+  if (access(coreml_path_flag_encoder.c_str(), F_OK) == 0) {
+    WHISPER_LOG_DEBUG("Core ML model from '%s' is exists.",
+                 compiled_path_coreml_encoder.c_str());
+    return 1;
+  }
+  WHISPER_LOG_DEBUG("Core ML model from '%s' is not exists.",
+               compiled_path_coreml_encoder.c_str());
+  return 0;
 }

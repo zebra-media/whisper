@@ -68,6 +68,42 @@ void whisper_coreml_encode(
     }
 }
 
+int whisper_coreml_compile(const char * path_model, const char * compile_path_model)
+{
+    if( path_model == nullptr || compile_path_model == nullptr)
+    {
+        return -1;
+    }
+    @autoreleasepool
+    {
+        @try {
+            NSError* error = nil;
+            NSURL *modelURL = [NSURL fileURLWithPath:@(path_model)];
+            if(![[NSFileManager defaultManager] fileExistsAtPath:@(path_model)])
+            {
+                return -5;
+            }
+            NSURL *destinationURL = [NSURL fileURLWithPath:@(compile_path_model)];
+            NSURL *compiledURL = [MLModel compileModelAtURL:modelURL error:&error];
+            // copy compiled model files to destinationURL and clean up files which producted by CoreML.
+            // remove old files
+            [[NSFileManager defaultManager] removeItemAtURL:destinationURL error:nil];
+            [[NSFileManager defaultManager] copyItemAtURL:compiledURL toURL:destinationURL error:&error];
+            [[NSFileManager defaultManager] removeItemAtURL:compiledURL error:nil];
+            if(error != nil)
+            {
+                return -(int)error.code;
+            }
+        }
+        @catch (NSException *exception)
+        {
+            fprintf(stderr, "%s: exception occurs.", __func__);
+            return -6;
+        }
+    }
+    return 0;
+}
+
 #if __cplusplus
 }
 #endif

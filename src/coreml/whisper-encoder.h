@@ -12,6 +12,9 @@ extern "C" {
 struct whisper_coreml_context;
 
 struct whisper_coreml_context * whisper_coreml_init(const char * path_model);
+
+int whisper_coreml_compile(const char * path_model, const char * compile_path_model);
+
 void whisper_coreml_free(struct whisper_coreml_context * ctx);
 
 void whisper_coreml_encode(
