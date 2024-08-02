@@ -3380,7 +3380,7 @@ static std::string whisper_openvino_get_path_cache(std::string path_bin) {
 }
 #endif
 
-struct whisper_state * whisper_init_state(whisper_context * ctx) {
+struct whisper_state * whisper_init_state(whisper_context * ctx, const char *model_md5) {
     whisper_state * state = new whisper_state;
 
     state->backends = whisper_backend_init(ctx->params);
@@ -3459,20 +3459,30 @@ struct whisper_state * whisper_init_state(whisper_context * ctx) {
     }
 
 #ifdef WHISPER_USE_COREML
-    const auto path_coreml = whisper_get_coreml_path_encoder(ctx->path_model);
+    if( model_md5 != nullptr)
+    {
+        const auto compiled_coreml_path_encoder = whisper_get_compiled_coreml_path_encoder(ctx->path_model);
 
-    WHISPER_LOG_INFO("%s: loading Core ML model from '%s'\n", __func__, path_coreml.c_str());
-    WHISPER_LOG_INFO("%s: first run on a device may take a while ...\n", __func__);
+        WHISPER_LOG_INFO("loading Core ML model from '%s'", compiled_coreml_path_encoder.c_str());
+        WHISPER_LOG_INFO("first run on a device may take a while ...");
 
-    state->ctx_coreml = whisper_coreml_init(path_coreml.c_str());
-    if (!state->ctx_coreml) {
-        WHISPER_LOG_ERROR("%s: failed to load Core ML model from '%s'\n", __func__, path_coreml.c_str());
-#ifndef WHISPER_COREML_ALLOW_FALLBACK
-        whisper_free_state(state);
-        return nullptr;
-#endif
-    } else {
-        WHISPER_LOG_INFO("%s: Core ML model loaded\n", __func__);
+        const auto& path_coreml_flag_encoder = whisper_get_coreml_path_flag_encoder(compiled_coreml_path_encoder, model_md5);
+        if(access(path_coreml_flag_encoder.c_str(), F_OK) == 0)
+        {
+            state->ctx_coreml = whisper_coreml_init(compiled_coreml_path_encoder.c_str());
+        }
+        else
+        {
+            state->ctx_coreml = nullptr;
+        }
+        if (state->ctx_coreml)
+        {
+            WHISPER_LOG_INFO("Core ML model loaded: %s", path_coreml_flag_encoder.c_str());
+        }
+        else
+        {
+            WHISPER_LOG_WARN("no model flag file %s, callback to ggml", path_coreml_flag_encoder.c_str());
+        }
     }
 #endif
 
@@ -3747,7 +3757,7 @@ struct whisper_context * whisper_init_from_file_with_params(const char * path_mo
         return nullptr;
     }
 
-    ctx->state = whisper_init_state(ctx);
+    ctx->state = whisper_init_state(ctx, nullptr);
     if (!ctx->state) {
         whisper_free(ctx);
         return nullptr;
@@ -3762,7 +3772,7 @@ struct whisper_context * whisper_init_from_buffer_with_params(void * buffer, siz
         return nullptr;
     }
 
-    ctx->state = whisper_init_state(ctx);
+    ctx->state = whisper_init_state(ctx, nullptr);
     if (!ctx->state) {
         whisper_free(ctx);
         return nullptr;
@@ -3777,7 +3787,7 @@ struct whisper_context * whisper_init_with_params(struct whisper_model_loader * 
         return nullptr;
     }
 
-    ctx->state = whisper_init_state(ctx);
+    ctx->state = whisper_init_state(ctx, nullptr);
     if (!ctx->state) {
         whisper_free(ctx);
         return nullptr;
@@ -4930,6 +4940,12 @@ static void whisper_exp_compute_token_level_timestamps_dtw(
                                int   n_frames,
                                int   medfilt_width,
                                int   n_threads);
+
+static void whisper_notify_new_segements(
+    struct whisper_context * ctx,
+    struct whisper_state * state,
+    struct whisper_full_params params,
+    int i_news);
 
 // wrap the last segment to max_len characters
 // returns the number of new segments
@@ -6341,6 +6357,10 @@ int whisper_full_with_state(
                     whisper_exp_compute_token_level_timestamps_dtw(
                             ctx, state, params, result_all.size() - n_segments, n_segments, seek, n_frames, 7, params.n_threads);
                 }
+
+                if (n_segments) {
+                    whisper_notify_new_segements(ctx, state, params, n_segments);
+                }
             }
 
             // update audio window
@@ -6384,7 +6404,7 @@ int whisper_full_parallel(
     std::vector<std::thread> workers(n_processors - 1);
     for (int i = 0; i < n_processors - 1; ++i) {
         // create a new state for each thread
-        states.push_back(whisper_init_state(ctx));
+        states.push_back(whisper_init_state(ctx, nullptr));
 
         const int start_samples = offset_samples + (i + 1)*n_samples_per_processor;
         const int n_samples_cur = (i == n_processors - 2) ? n_samples - start_samples : n_samples_per_processor;
@@ -7461,6 +7481,139 @@ static void whisper_exp_compute_token_level_timestamps_dtw(
     ggml_free(gctx);
 }
 
+void whisper_notify_new_segements(
+    struct whisper_context * ctx,
+    struct whisper_state * state,
+    struct whisper_full_params params,
+    int i_news) {
+
+    if(!params.new_alignment_segment_callback)
+    {
+        return;
+    }
+
+    size_t numberWords = 0;
+    size_t transcriptions = 0;
+    size_t sizeOfTranscription = 0;
+    size_t sizeOfWords = 0;
+    for( auto it : state->result_all) {
+        int words = 0;
+        for (auto itToken : it.tokens){
+            if(itToken.id >=  whisper_token_eot(ctx)) {
+                continue;
+            }
+            const char * tok = whisper_token_to_str(ctx, itToken.id);
+            size_t toklen = strlen(tok);
+            words += toklen;
+            sizeOfWords += (toklen + 1);
+            sizeOfTranscription += toklen;
+        }
+        if(words) {
+            // words
+            sizeOfTranscription += 1;
+            transcriptions += 1;
+        }
+        numberWords += words;
+    }
+
+    if (transcriptions == 0) {
+        static whisper_aligment_data empty = {};
+        params.new_alignment_segment_callback(ctx, state, &empty, params.new_alignment_segment_callback_user_data);
+        return;
+    }
+
+    size_t bufferSize = sizeof(whisper_aligment_data) + sizeof(whisper_transcription) * transcriptions + sizeof(whisper_word) * numberWords + sizeOfTranscription + sizeOfWords;
+    char *pBuffer = (char *)malloc(bufferSize);
+    if( pBuffer == nullptr)
+    {
+        WHISPER_LOG_ERROR("outf memeory!!!!");
+        return;
+    }
+    memset(pBuffer, 0, bufferSize);
+    whisper_aligment_data* pAligmentData = (whisper_aligment_data*)pBuffer;
+    whisper_transcription* pTranscriptionBegin = (whisper_transcription*)(pBuffer + sizeof(whisper_aligment_data));
+    whisper_word* pWordsBegin = (whisper_word*)(pTranscriptionBegin + transcriptions);
+    char* pTranscriptionText = (char*)(pWordsBegin + numberWords);
+    char* pWordText = pTranscriptionText + sizeOfTranscription;
+
+    pAligmentData->numberOfTranscriptions = (int)transcriptions;
+    pAligmentData->transcriptions = pTranscriptionBegin;
+
+    whisper_word* pWords = pWordsBegin;
+    whisper_transcription* pTranscription = pTranscriptionBegin;
+    bool dtwContinuous = false;
+    whisper_token_data lastToken;
+    for( auto it : state->result_all) {
+        whisper_word *pCurrentWords = pWords;
+        char* pCurrentTranscriptionText = pTranscriptionText;
+        for (auto itToken : it.tokens){
+            if(itToken.id >=  whisper_token_eot(ctx)) {
+                continue;
+            }
+
+            lastToken = itToken;
+            const char * tok = whisper_token_to_str(ctx, itToken.id);
+            size_t toklen = strlen(tok);
+            memcpy(pTranscriptionText, tok, toklen);
+            memcpy(pWordText, tok, toklen);
+            pWordText[toklen] = 0;
+
+            if(dtwContinuous) {
+                if(itToken.t_dtw >= 0 ) {
+                    (pWords-1)->end = itToken.t_dtw * 10000;
+                } else {
+                    (pWords-1)->end = itToken.t0 * 10000;
+                }
+                dtwContinuous = false;
+            }
+
+            if(itToken.t_dtw >= 0 ) {
+                // 10milliseconds -> microseconds.
+                pWords->start = itToken.t_dtw * 10000;
+                dtwContinuous = true;
+            } else {
+                pWords->start = itToken.t0 * 10000;
+                pWords->end = itToken.t1 * 10000;
+            }
+            pWords->text = pWordText;
+            pWords->prob = int(itToken.p * 100);
+            pWords->prob = pWords->prob < 0 ? 0: pWords->prob;
+            pWords->prob = pWords->prob > 100 ? 100: pWords->prob;
+
+            pTranscriptionText += toklen;
+            pWordText += toklen + 1;
+            pWords += 1;
+        }
+        if(pWords != pCurrentWords) {
+            pTranscriptionText[0] = 0;
+            pTranscriptionText++;
+            pTranscription->text = pCurrentTranscriptionText;
+            pTranscription->numberOfWords = int(pWords - pCurrentWords);
+            pTranscription->words = pCurrentWords;
+            pTranscription++;
+        }
+    }
+
+    if(dtwContinuous) {
+        if(lastToken.t_dtw >= 0 ) {
+            (pWords-1)->end = lastToken.t_dtw * 10000;
+        } else {
+            (pWords-1)->end = lastToken.t0 * 10000;
+        }
+        dtwContinuous = false;
+    }
+
+    for (size_t i = 0; i < transcriptions; i++)
+    {
+        pTranscription = pTranscriptionBegin + i;
+        pTranscription->start = pTranscription->words[0].start;
+        pTranscription->end = pTranscription->words[pTranscription->numberOfWords-1].end;
+    }
+
+    params.new_alignment_segment_callback(ctx, state, pAligmentData, params.new_alignment_segment_callback_user_data);
+    free(pBuffer);
+}
+
 void whisper_log_set(ggml_log_callback log_callback, void * user_data) {
     g_state.log_callback = log_callback ? log_callback : whisper_log_callback_default;
     g_state.log_callback_user_data = user_data;
@@ -7556,9 +7709,8 @@ int whisper_gpu_is_compiled_from_file(const char *path_model,
   if (path_model == nullptr || model_md5 == nullptr) {
     return -1;
   }
-#ifndef WHISPER_USE_COREML
-  return 0;
-#endif
+
+#ifdef WHISPER_USE_COREML
   const auto &compiled_path_coreml_encoder =
       whisper_get_compiled_coreml_path_encoder(path_model);
   WHISPER_LOG_DEBUG("Checking Core ML model from '%s'",
@@ -7573,4 +7725,7 @@ int whisper_gpu_is_compiled_from_file(const char *path_model,
   WHISPER_LOG_DEBUG("Core ML model from '%s' is not exists.",
                compiled_path_coreml_encoder.c_str());
   return 0;
+#else
+  return 1;
+#endif
 }
