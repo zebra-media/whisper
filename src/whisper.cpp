@@ -7496,9 +7496,9 @@ void whisper_notify_new_segements(
     size_t transcriptions = 0;
     size_t sizeOfTranscription = 0;
     size_t sizeOfWords = 0;
-    for( auto it : state->result_all) {
+    for( auto it = state->result_all.cend()-i_news; it != state->result_all.cend(); it++) {
         int words = 0;
-        for (auto itToken : it.tokens){
+        for (auto itToken : (*it).tokens){
             if(itToken.id >=  whisper_token_eot(ctx)) {
                 continue;
             }
@@ -7543,10 +7543,10 @@ void whisper_notify_new_segements(
     whisper_transcription* pTranscription = pTranscriptionBegin;
     bool dtwContinuous = false;
     whisper_token_data lastToken;
-    for( auto it : state->result_all) {
+    for( auto it = state->result_all.cend()-i_news; it != state->result_all.cend(); it++) {
         whisper_word *pCurrentWords = pWords;
         char* pCurrentTranscriptionText = pTranscriptionText;
-        for (auto itToken : it.tokens){
+        for (auto itToken : (*it).tokens){
             if(itToken.id >=  whisper_token_eot(ctx)) {
                 continue;
             }
