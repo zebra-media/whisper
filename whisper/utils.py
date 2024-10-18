@@ -288,7 +288,7 @@ class WriteJSON(ResultWriter):
     def write_result(
         self, result: dict, file: TextIO, options: Optional[dict] = None, **kwargs
     ):
-        json.dump(result, file)
+        json.dump(result, file, ensure_ascii=False)
 
 
 def get_writer(
