@@ -140,15 +140,15 @@ WHISPER_ATTRIBUTE_FORMAT(2, 3)
 static void whisper_log_internal        (ggml_log_level level, const char * format, ...);
 static void whisper_log_callback_default(ggml_log_level level, const char * text, void * user_data);
 
-#define WHISPER_LOG_ERROR(...) whisper_log_internal(GGML_LOG_LEVEL_ERROR, __VA_ARGS__)
-#define WHISPER_LOG_WARN(...)  whisper_log_internal(GGML_LOG_LEVEL_WARN , __VA_ARGS__)
-#define WHISPER_LOG_INFO(...)  whisper_log_internal(GGML_LOG_LEVEL_INFO , __VA_ARGS__)
+#define WHISPER_LOG_ERROR(fmt, ...)  whisper_log_internal(GGML_LOG_LEVEL_ERROR, "%s %s[%d]: " fmt "\n", __FILE__, __func__, __LINE__, ##__VA_ARGS__)
+#define WHISPER_LOG_WARN(fmt, ...)   whisper_log_internal(GGML_LOG_LEVEL_WARN, "%s %s[%d]: " fmt "\n", __FILE__,  __func__, __LINE__, ##__VA_ARGS__)
+#define WHISPER_LOG_INFO(fmt, ...)   whisper_log_internal(GGML_LOG_LEVEL_INFO, "%s %s[%d]: " fmt "\n", __FILE__,  __func__, __LINE__, ##__VA_ARGS__)
 
 // define this to enable verbose trace logging - useful for debugging purposes
 //#define WHISPER_DEBUG
 
 #if defined(WHISPER_DEBUG)
-#define WHISPER_LOG_DEBUG(...) whisper_log_internal(GGML_LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define WHISPER_LOG_DEBUG(fmt, ...) whisper_log_internal(GGML_LOG_LEVEL_DEBUG, "%s %s[%d]: " fmt "\n", __FILE__, __func__, __LINE__, ##__VA_ARGS__)
 #else
 #define WHISPER_LOG_DEBUG(...)
 #endif
@@ -156,7 +156,7 @@ static void whisper_log_callback_default(ggml_log_level level, const char * text
 #define WHISPER_ASSERT(x) \
     do { \
         if (!(x)) { \
-            WHISPER_LOG_ERROR("WHISPER_ASSERT: %s:%d: %s\n", __FILE__, __LINE__, #x); \
+            WHISPER_LOG_ERROR("WHISPER_ASSERT: %s", #x); \
             abort(); \
         } \
     } while (0)
@@ -541,7 +541,7 @@ static bool whisper_sched_graph_init(struct whisper_sched & allocr, std::vector<
     // we need to allocate them instead of only reserving to get the correct compute buffer size
     if (!ggml_backend_sched_alloc_graph(sched, get_graph())) {
         // failed to allocate the compute buffer
-        WHISPER_LOG_ERROR("%s: failed to allocate the compute buffer\n", __func__);
+        WHISPER_LOG_ERROR("failed to allocate the compute buffer");
         return false;
     }
 
@@ -944,7 +944,7 @@ static bool whisper_kv_cache_init(
     cache.ctx = ggml_init(params);
 
     if (!cache.ctx) {
-        WHISPER_LOG_ERROR("%s: failed to allocate memory for the kv cache context\n", __func__);
+        WHISPER_LOG_ERROR("failed to allocate memory for the kv cache context");
         return false;
     }
 
@@ -953,7 +953,7 @@ static bool whisper_kv_cache_init(
 
     cache.buffer = ggml_backend_alloc_ctx_tensors(cache.ctx, backend);
     if (!cache.buffer) {
-        WHISPER_LOG_ERROR("%s: failed to allocate memory for the kv cache\n", __func__);
+        WHISPER_LOG_ERROR("failed to allocate memory for the kv cache");
         return false;
     }
 
@@ -975,7 +975,7 @@ static bool whisper_kv_cache_find_slot(
     const uint32_t n_tokens = batch.n_tokens;
 
     if (n_tokens > n_ctx) {
-        WHISPER_LOG_ERROR("%s: n_tokens=%d > n_ctx=%d\n", __func__, n_tokens, n_ctx);
+        WHISPER_LOG_ERROR("n_tokens=%d > n_ctx=%d", n_tokens, n_ctx);
         return false;
     }
 
@@ -1003,7 +1003,7 @@ static bool whisper_kv_cache_find_slot(
         }
 
         if (n_tested >= n_ctx) {
-            //WHISPER_LOG_ERROR("%s: failed to find a slot for %d tokens\n", __func__, n_tokens);
+            //WHISPER_LOG_ERROR("failed to find a slot for %d tokens", n_tokens);
             return false;
         }
     }
@@ -1118,40 +1118,40 @@ static bool aheads_masks_init(
 
     // Sanity checks
     if (cparams.dtw_aheads_preset == WHISPER_AHEADS_NONE) {
-        WHISPER_LOG_ERROR("%s: dtw_aheads_preset should be != DTW_AHEADS_NONE\n", __func__);
+        WHISPER_LOG_ERROR("dtw_aheads_preset should be != DTW_AHEADS_NONE");
         return false;
     } else if (cparams.dtw_aheads_preset == WHISPER_AHEADS_N_TOP_MOST) {
         if (cparams.dtw_n_top > n_text_layer || cparams.dtw_n_top <= 0) {
-            WHISPER_LOG_ERROR("%s: dtw_n_top must be between %d and %d for this model.", __func__, 1, n_text_layer);
+            WHISPER_LOG_ERROR("dtw_n_top must be between %d and %d for this model.", 1, n_text_layer);
             return false;
         }
     } else {
         const auto aheads = cparams.dtw_aheads_preset == WHISPER_AHEADS_CUSTOM ? cparams.dtw_aheads : g_aheads.at(cparams.dtw_aheads_preset);
         if (cparams.dtw_aheads_preset == WHISPER_AHEADS_CUSTOM) {
             if (aheads.n_heads == 0) {
-                WHISPER_LOG_ERROR("%s: dtw_aheads.n_heads should be > 0", __func__);
+                WHISPER_LOG_ERROR("dtw_aheads.n_heads should be > 0");
                 return false;
             }
             if (aheads.heads == NULL) {
-                WHISPER_LOG_ERROR("%s: dtw_aheads.heads unset", __func__);
+                WHISPER_LOG_ERROR("dtw_aheads.heads unset");
                 return false;
             }
         }
         for (size_t i = 0; i < aheads.n_heads; ++i) {
             if (aheads.heads[i].n_text_layer >= n_text_layer) {
-                WHISPER_LOG_ERROR("%s: tried to set alignment head on text layer %d, but model only has %d text layers", __func__, aheads.heads[i].n_text_layer + 1, n_text_layer);
+                WHISPER_LOG_ERROR("tried to set alignment head on text layer %d, but model only has %d text layers", aheads.heads[i].n_text_layer + 1, n_text_layer);
                 return false;
             }
             if (aheads.heads[i].n_text_layer < 0) {
-                WHISPER_LOG_ERROR("%s: tried to set alignment head on text layer < 0", __func__);
+                WHISPER_LOG_ERROR("tried to set alignment head on text layer < 0");
                 return false;
             }
             if (aheads.heads[i].n_head >= n_head) {
-                WHISPER_LOG_ERROR("%s: tried to set alignment head on head %d, but model only has %d heads", __func__, aheads.heads[i].n_head + 1, n_head);
+                WHISPER_LOG_ERROR("tried to set alignment head on head %d, but model only has %d heads", aheads.heads[i].n_head + 1, n_head);
                 return false;
             }
             if (aheads.heads[i].n_head < 0) {
-                WHISPER_LOG_ERROR("%s: tried to set alignment head on head < 0", __func__);
+                WHISPER_LOG_ERROR("tried to set alignment head on head < 0");
                 return false;
             }
         }
@@ -1166,7 +1166,7 @@ static bool aheads_masks_init(
     aheads_masks.ctx = ggml_init(params);
 
     if (!aheads_masks.ctx) {
-        WHISPER_LOG_ERROR("%s: failed to allocate memory for the aheads_masks context\n", __func__);
+        WHISPER_LOG_ERROR("failed to allocate memory for the aheads_masks context");
         return false;
     }
 
@@ -1181,7 +1181,7 @@ static bool aheads_masks_init(
 
     aheads_masks.buffer = ggml_backend_alloc_ctx_tensors(aheads_masks.ctx, backend);
     if (!aheads_masks.buffer) {
-        WHISPER_LOG_ERROR("%s: failed to allocate memory for aheads_masks\n", __func__);
+        WHISPER_LOG_ERROR("failed to allocate memory for aheads_masks");
         return false;
     }
 
@@ -1215,7 +1215,7 @@ static bool aheads_masks_init(
     }
 
     if (aheads_masks.m.empty()) {
-        WHISPER_LOG_ERROR("%s: \n", __func__);
+        WHISPER_LOG_ERROR("aheads_masks.m is empty");
         return false;
     }
 
@@ -1242,23 +1242,23 @@ static ggml_backend_t whisper_backend_init_gpu(const whisper_context_params & pa
 
 #ifdef GGML_USE_CUDA
     if (params.use_gpu) {
-        WHISPER_LOG_INFO("%s: using CUDA backend\n", __func__);
+        WHISPER_LOG_INFO("using CUDA backend");
         result = ggml_backend_cuda_init(params.gpu_device);
         if (!result) {
-            WHISPER_LOG_ERROR("%s: ggml_backend_cuda_init() failed\n", __func__);
+            WHISPER_LOG_ERROR("ggml_backend_cuda_init() failed");
         }
     }
 #endif
 
 #ifdef GGML_USE_METAL
     if (params.use_gpu) {
-        WHISPER_LOG_INFO("%s: using Metal backend\n", __func__);
+        WHISPER_LOG_INFO("using Metal backend");
         ggml_backend_metal_log_set_callback(g_state.log_callback, g_state.log_callback_user_data);
         result = ggml_backend_metal_init();
         if (!result) {
-            WHISPER_LOG_ERROR("%s: ggml_backend_metal_init() failed\n", __func__);
+            WHISPER_LOG_ERROR("ggml_backend_metal_init() failed");
         } else if (!ggml_backend_metal_supports_family(result, 7)) {
-            WHISPER_LOG_ERROR("%s: Metal GPU does not support family 7 - falling back to CPU\n", __func__);
+            WHISPER_LOG_ERROR("Metal GPU does not support family 7 - falling back to CPU");
             ggml_backend_free(result);
             result = NULL;
         }
@@ -1267,20 +1267,20 @@ static ggml_backend_t whisper_backend_init_gpu(const whisper_context_params & pa
 
 #ifdef GGML_USE_SYCL
     if (params.use_gpu) {
-        WHISPER_LOG_INFO("%s: using SYCL backend\n", __func__);
+        WHISPER_LOG_INFO("using SYCL backend");
         result = ggml_backend_sycl_init(params.gpu_device);
         if (!result) {
-            WHISPER_LOG_ERROR("%s: ggml_backend_sycl_init() failed\n", __func__);
+            WHISPER_LOG_ERROR("ggml_backend_sycl_init() failed");
         }
     }
 #endif
 
 #ifdef GGML_USE_VULKAN
     if (params.use_gpu) {
-        WHISPER_LOG_INFO("%s: using Vulkan backend\n", __func__);
+        WHISPER_LOG_INFO("using Vulkan backend");
         result = ggml_backend_vk_init(params.gpu_device);
         if (!result) {
-            WHISPER_LOG_ERROR("%s: ggml_backend_vk_init() failed\n", __func__);
+            WHISPER_LOG_ERROR("ggml_backend_vk_init() failed");
         }
     }
 #endif
@@ -1299,10 +1299,10 @@ static std::vector<ggml_backend_t> whisper_backend_init(const whisper_context_pa
 
 #ifdef GGML_USE_BLAS
     {
-        WHISPER_LOG_INFO("%s: using BLAS backend\n", __func__);
+        WHISPER_LOG_INFO("using BLAS backend");
         ggml_backend_t backend_blas = ggml_backend_blas_init();
         if (!backend_blas) {
-            WHISPER_LOG_ERROR("%s: ggml_backend_blas_init() failed\n", __func__);
+            WHISPER_LOG_ERROR("ggml_backend_blas_init() failed");
         } else {
             result.push_back(backend_blas);
         }
@@ -1342,6 +1342,18 @@ static ggml_backend_buffer_type_t whisper_default_buffer_type(const whisper_cont
     return result;
 }
 
+
+// whisper_token_length
+static int whisper_token_length(unsigned char chr) {
+    if ((chr & 0x80) == 0) return 1;         // 0xxxxxxx: ASCII
+    else if ((chr & 0xE0) == 0xC0) return 2; // 110xxxxx: 2 字节
+    else if ((chr & 0xF0) == 0xE0) return 3; // 1110xxxx: 3 字节
+    else if ((chr & 0xF8) == 0xF0) return 4; // 11110xxx: 4 字节
+    else if ((chr & 0xFC) == 0xF8) return 5; // 111110xx: 5 字节
+    else if ((chr & 0xFE) == 0xFC) return 6; // 1111110x: 6 字节
+    else return -1;                           // 无效字节
+}
+
 // load the model from a ggml file
 //
 // file format:
@@ -1354,7 +1366,7 @@ static ggml_backend_buffer_type_t whisper_default_buffer_type(const whisper_cont
 // see the convert-pt-to-ggml.py script for details
 //
 static bool whisper_model_load(struct whisper_model_loader * loader, whisper_context & wctx) {
-    WHISPER_LOG_INFO("%s: loading model\n", __func__);
+    WHISPER_LOG_INFO("loading model");
 
     const int64_t t_start_us = ggml_time_us();
 
@@ -1368,7 +1380,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
         uint32_t magic;
         read_safe(loader, magic);
         if (magic != GGML_FILE_MAGIC) {
-            WHISPER_LOG_ERROR("%s: invalid model data (bad magic)\n", __func__);
+            WHISPER_LOG_ERROR("invalid model data (bad magic)");
             return false;
         }
     }
@@ -1425,23 +1437,23 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
         // in order to save memory and also to speed up the computation
         wctx.wtype = ggml_ftype_to_ggml_type((ggml_ftype) (model.hparams.ftype));
         if (wctx.wtype == GGML_TYPE_COUNT) {
-            WHISPER_LOG_ERROR("%s: invalid model (bad ftype value %d)\n", __func__, model.hparams.ftype);
+            WHISPER_LOG_ERROR("invalid model (bad ftype value %d)", model.hparams.ftype);
             return false;
         }
 
-        WHISPER_LOG_INFO("%s: n_vocab       = %d\n", __func__, hparams.n_vocab);
-        WHISPER_LOG_INFO("%s: n_audio_ctx   = %d\n", __func__, hparams.n_audio_ctx);
-        WHISPER_LOG_INFO("%s: n_audio_state = %d\n", __func__, hparams.n_audio_state);
-        WHISPER_LOG_INFO("%s: n_audio_head  = %d\n", __func__, hparams.n_audio_head);
-        WHISPER_LOG_INFO("%s: n_audio_layer = %d\n", __func__, hparams.n_audio_layer);
-        WHISPER_LOG_INFO("%s: n_text_ctx    = %d\n", __func__, hparams.n_text_ctx);
-        WHISPER_LOG_INFO("%s: n_text_state  = %d\n", __func__, hparams.n_text_state);
-        WHISPER_LOG_INFO("%s: n_text_head   = %d\n", __func__, hparams.n_text_head);
-        WHISPER_LOG_INFO("%s: n_text_layer  = %d\n", __func__, hparams.n_text_layer);
-        WHISPER_LOG_INFO("%s: n_mels        = %d\n", __func__, hparams.n_mels);
-        WHISPER_LOG_INFO("%s: ftype         = %d\n", __func__, model.hparams.ftype);
-        WHISPER_LOG_INFO("%s: qntvr         = %d\n", __func__, qntvr);
-        WHISPER_LOG_INFO("%s: type          = %d (%s%s)\n", __func__, model.type, g_model_name.at(model.type).c_str(), mver.c_str());
+        WHISPER_LOG_INFO("n_vocab       = %d", hparams.n_vocab);
+        WHISPER_LOG_INFO("n_audio_ctx   = %d", hparams.n_audio_ctx);
+        WHISPER_LOG_INFO("n_audio_state = %d", hparams.n_audio_state);
+        WHISPER_LOG_INFO("n_audio_head  = %d", hparams.n_audio_head);
+        WHISPER_LOG_INFO("n_audio_layer = %d", hparams.n_audio_layer);
+        WHISPER_LOG_INFO("n_text_ctx    = %d", hparams.n_text_ctx);
+        WHISPER_LOG_INFO("n_text_state  = %d", hparams.n_text_state);
+        WHISPER_LOG_INFO("n_text_head   = %d", hparams.n_text_head);
+        WHISPER_LOG_INFO("n_text_layer  = %d", hparams.n_text_layer);
+        WHISPER_LOG_INFO("n_mels        = %d", hparams.n_mels);
+        WHISPER_LOG_INFO("ftype         = %d", model.hparams.ftype);
+        WHISPER_LOG_INFO("qntvr         = %d", qntvr);
+        WHISPER_LOG_INFO("type          = %d (%s%s)", model.type, g_model_name.at(model.type).c_str(), mver.c_str());
     }
 
     // load mel filters
@@ -1462,8 +1474,8 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
         read_safe(loader, n_vocab);
 
         //if (n_vocab != model.hparams.n_vocab) {
-        //    WHISPER_LOG_ERROR("%s: invalid model file '%s' (bad vocab size %d != %d)\n",
-        //            __func__, fname.c_str(), n_vocab, model.hparams.n_vocab);
+        //    WHISPER_LOG_ERROR("invalid model file '%s' (bad vocab size %d != %d)",
+        //            fname.c_str(), n_vocab, model.hparams.n_vocab);
         //    return false;
         //}
 
@@ -1480,16 +1492,36 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
                 tmp.resize(len);
                 loader->read(loader->context, &tmp[0], tmp.size()); // read to buffer
                 word.assign(&tmp[0], tmp.size());
+
+                // invalid utf-8
+                const char * tok = word.c_str();
+                size_t toklen = strlen(tok);
+                bool invalid = true;
+                while (toklen > 0) {
+                    int length = whisper_token_length(tok[0]);
+                    if (length < 0 || toklen < (size_t)(length)) {
+                        invalid = false;
+                        break;
+                    }
+                    tok += length;
+                    toklen -= length;
+                }
+
+                if (!invalid) {
+                    word = "";
+                }
+
             } else {
                 // seems like we have an empty-string token in multi-language models (i = 50256)
-                //WHISPER_LOG_WARN("%s: warning: empty-string token in vocab, i = %d\n", __func__, i);
+                //WHISPER_LOG_WARN("warning: empty-string token in vocab, i = %d", i);
                 word = "";
             }
+
 
             vocab.token_to_id[word] = i;
             vocab.id_to_token[i] = word;
 
-            //printf("%s: vocab[%d] = '%s'\n", __func__, i, word.c_str());
+            //WHISPER_LOG_DEBUG(vocab[%d] = '%s'", i, word.c_str());
         }
 
         vocab.n_vocab = model.hparams.n_vocab;
@@ -1510,7 +1542,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
         }
 
         if (n_vocab < model.hparams.n_vocab) {
-            WHISPER_LOG_INFO("%s: adding %d extra tokens\n", __func__, model.hparams.n_vocab - n_vocab);
+            WHISPER_LOG_INFO("adding %d extra tokens", model.hparams.n_vocab - n_vocab);
             for (int i = n_vocab; i < model.hparams.n_vocab; i++) {
                 if (i > vocab.token_beg) {
                     word = "[_TT_" + std::to_string(i - vocab.token_beg) + "]";
@@ -1542,7 +1574,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
             }
         }
 
-        WHISPER_LOG_INFO("%s: n_langs       = %d\n", __func__, vocab.num_languages());
+        WHISPER_LOG_INFO("n_langs       = %d", vocab.num_languages());
     }
 
     const ggml_type wtype = wctx.wtype;
@@ -1565,7 +1597,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
 
         model.ctx = ggml_init(params);
         if (!model.ctx) {
-            WHISPER_LOG_ERROR("%s: ggml_init() failed\n", __func__);
+            WHISPER_LOG_ERROR("ggml_init() failed");
             return false;
         }
     }
@@ -1769,12 +1801,12 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
     // allocate tensors in the backend buffers
     model.buffer = ggml_backend_alloc_ctx_tensors_from_buft(model.ctx, whisper_default_buffer_type(wctx.params));
     if (!model.buffer) {
-        WHISPER_LOG_ERROR("%s: failed to allocate memory for the model\n", __func__);
+        WHISPER_LOG_ERROR("failed to allocate memory for the model");
         return false;
     }
 
     size_t size_main = ggml_backend_buffer_get_size(model.buffer);
-    WHISPER_LOG_INFO("%s: %8s total size = %8.2f MB\n", __func__, ggml_backend_buffer_name(model.buffer), size_main / 1e6);
+    WHISPER_LOG_INFO("%8s total size = %8.2f MB", ggml_backend_buffer_name(model.buffer), size_main / 1e6);
 
     // load weights
     {
@@ -1810,36 +1842,36 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
             name.assign(&tmp[0], tmp.size());
 
             if (model.tensors.find(name) == model.tensors.end()) {
-                WHISPER_LOG_ERROR("%s: unknown tensor '%s' in model file\n", __func__, name.data());
+                WHISPER_LOG_ERROR("unknown tensor '%s' in model file", name.data());
                 return false;
             }
 
             auto tensor = model.tensors[name.data()];
 
             if (ggml_nelements(tensor) != nelements) {
-                WHISPER_LOG_ERROR("%s: tensor '%s' has wrong size in model file\n", __func__, name.data());
-                WHISPER_LOG_ERROR("%s: shape: [%d, %d, %d], expected: [%d, %d, %d]\n",
-                        __func__, ne[0], ne[1], ne[2], (int) tensor->ne[0], (int) tensor->ne[1], (int) tensor->ne[2]);
+                WHISPER_LOG_ERROR("tensor '%s' has wrong size in model file", name.data());
+                WHISPER_LOG_ERROR("shape: [%d, %d, %d], expected: [%d, %d, %d]",
+                        ne[0], ne[1], ne[2], (int) tensor->ne[0], (int) tensor->ne[1], (int) tensor->ne[2]);
                 return false;
             }
 
             if (tensor->ne[0] != ne[0] || tensor->ne[1] != ne[1] || tensor->ne[2] != ne[2]) {
-                WHISPER_LOG_ERROR("%s: tensor '%s' has wrong shape in model file: got [%d, %d, %d], expected [%d, %d, %d]\n",
-                        __func__, name.data(), (int) tensor->ne[0], (int) tensor->ne[1], (int) tensor->ne[2], ne[0], ne[1], ne[2]);
+                WHISPER_LOG_ERROR("tensor '%s' has wrong shape in model file: got [%d, %d, %d], expected [%d, %d, %d]",
+                        name.data(), (int) tensor->ne[0], (int) tensor->ne[1], (int) tensor->ne[2], ne[0], ne[1], ne[2]);
                 return false;
             }
 
             const size_t bpe = ggml_type_size(ggml_type(ttype));
 
             if ((nelements*bpe)/ggml_blck_size(tensor->type) != ggml_nbytes(tensor)) {
-                WHISPER_LOG_ERROR("%s: tensor '%s' has wrong size in model file: got %zu, expected %zu\n",
-                        __func__, name.data(), ggml_nbytes(tensor), nelements*bpe);
+                WHISPER_LOG_ERROR("tensor '%s' has wrong size in model file: got %zu, expected %zu",
+                        name.data(), ggml_nbytes(tensor), nelements*bpe);
                 return false;
             }
 
             //ggml_backend_t backend = wctx.backend;
 
-            //printf("%s: [%5.5s] %s\n", __func__, ggml_backend_name(backend), name.c_str());
+            //WHISPER_LOG_DEBUG("[%5.5s] %s", ggml_backend_name(backend), name.c_str());
 
             if (ggml_backend_buffer_is_host(model.buffer)) {
                 // for the CPU and Metal backend, we can read directly into the tensor
@@ -1854,17 +1886,17 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
                 ggml_backend_tensor_set(tensor, read_buf.data(), 0, ggml_nbytes(tensor));
             }
 
-            //printf("%48s - [%5d, %5d, %5d], type = %6s, %6.2f MB\n", name.data(), ne[0], ne[1], ne[2], ggml_type_name((ggml_type) ttype), ggml_nbytes(tensor)/1e6);
+            //WHISPER_LOG_DEBUG("%48s - [%5d, %5d, %5d], type = %6s, %6.2f MB", name.data(), ne[0], ne[1], ne[2], ggml_type_name((ggml_type) ttype), ggml_nbytes(tensor)/1e6);
             total_size += ggml_nbytes(tensor);
             model.n_loaded++;
         }
 
-        WHISPER_LOG_INFO("%s: model size    = %7.2f MB\n", __func__, total_size/1e6);
+        WHISPER_LOG_INFO("model size    = %7.2f MB", total_size/1e6);
 
         if (model.n_loaded == 0) {
-            WHISPER_LOG_WARN("%s: WARN no tensors loaded from model file - assuming empty model for testing\n", __func__);
+            WHISPER_LOG_WARN("WARN no tensors loaded from model file - assuming empty model for testing");
         } else if (model.n_loaded != (int) model.tensors.size()) {
-            WHISPER_LOG_ERROR("%s: ERROR not all tensors loaded from model file - expected %zu, got %d\n", __func__, model.tensors.size(), model.n_loaded);
+            WHISPER_LOG_ERROR("ERROR not all tensors loaded from model file - expected %zu, got %d", model.tensors.size(), model.n_loaded);
             return false;
         }
     }
@@ -2215,7 +2247,7 @@ static struct ggml_cgraph * whisper_build_graph_encoder(
 
     ////////////////////////////////////////////////////////////////////////////
 
-    //printf("%s: used_mem = %f MB, %f MB, %f MB %f MB %f MB\n", __func__,
+    //WHISPER_LOG_DEBUG("used_mem = %f MB, %f MB, %f MB %f MB %f MB",
     //        ggml_used_mem(ctx0)/1e6,
     //        wstate.get_buf_max_mem(0)/1e6,
     //        wstate.get_buf_max_mem(1)/1e6,
@@ -2416,7 +2448,7 @@ static struct ggml_cgraph * whisper_build_graph_decoder(
     const int32_t n_kv    = worst_case ? n_ctx            : kv_self.n;
     const int32_t kv_head = worst_case ? n_ctx - n_tokens : kv_self.head;
 
-    //WHISPER_LOG_DEBUG("%s: n_past = %d, n_tokens = %d, n_audio_ctx = %d, n_ctx = %d\n", __func__, n_past, n_tokens, n_audio_ctx, n_ctx);
+    //WHISPER_LOG_DEBUG("n_past = %d, n_tokens = %d, n_audio_ctx = %d, n_ctx = %d", n_past, n_tokens, n_audio_ctx, n_ctx);
 
     struct ggml_init_params params = {
         /*.mem_size   =*/ wstate.sched_decode.meta.size(),
@@ -2814,7 +2846,7 @@ static bool whisper_decode_internal(
         kv_self.n = std::min(kv_self.size, std::max(pad, GGML_PAD(whisper_kv_cache_cell_max(kv_self), pad)));
 
         //kv_self.n = std::min((int32_t) hparams.n_text_ctx, std::max(32, whisper_kv_cache_cell_max(kv_self)));
-        //printf("n_tokens = %5d, kv_self.head = %5d, kv_self.n = %5d, seq_id = %5d\n", batch.n_tokens, kv_self.head, kv_self.n, batch.seq_id[0][0]);
+        //WHISPER_LOG_DEBUG("n_tokens = %5d, kv_self.head = %5d, kv_self.n = %5d, seq_id = %5d", batch.n_tokens, kv_self.head, kv_self.n, batch.seq_id[0][0]);
     }
 
     // decoder
@@ -2892,7 +2924,7 @@ static bool whisper_decode_internal(
     }
 
     if (batch.n_tokens > 1) {
-        //printf("%s: used_mem = %f MB, %f MB, %f MB %f MB %f MB\n", __func__,
+        //WHISPER_LOG_DEBUG("used_mem = %f MB, %f MB, %f MB %f MB %f MB",
         //        ggml_used_mem(ctx0)/1e6,
         //        wstate.get_buf_max_mem(0)/1e6,
         //        wstate.get_buf_max_mem(1)/1e6,
@@ -2972,7 +3004,7 @@ struct whisper_global_cache {
 // Mel spectrogram
 
 void whisper_mel_init(whisper_mel & mel, ggml_backend_t backend, int n_len, int n_len_org, int n_mel) {
-    //WHISPER_LOG_INFO("%s: n_len = %d, n_len_org = %d, n_mel = %d\n", __func__, n_len, n_len_org, n_mel);
+    //WHISPER_LOG_INFO("n_len = %d, n_len_org = %d, n_mel = %d", n_len, n_len_org, n_mel);
     mel.n_len_org = n_len_org;
     assert(!mel.ctx);
     mel.ctx = ggml_init({ggml_tensor_overhead(), nullptr, true});
@@ -3381,11 +3413,13 @@ static std::string whisper_openvino_get_path_cache(std::string path_bin) {
 #endif
 
 struct whisper_state * whisper_init_state(whisper_context * ctx, const char *model_md5) {
+    (void)model_md5;
+
     whisper_state * state = new whisper_state;
 
     state->backends = whisper_backend_init(ctx->params);
     if (state->backends.empty()) {
-        WHISPER_LOG_ERROR("%s: whisper_backend_init() failed\n", __func__);
+        WHISPER_LOG_ERROR("whisper_backend_init() failed");
         whisper_free_state(state);
         return nullptr;
     }
@@ -3409,53 +3443,53 @@ struct whisper_state * whisper_init_state(whisper_context * ctx, const char *mod
                 ctx->model.hparams.n_text_state,
                 ctx->model.hparams.n_text_layer,
                 GGML_PAD(ctx->model.hparams.n_text_ctx, 256)*factor)) {
-        WHISPER_LOG_ERROR("%s: whisper_kv_cache_init() failed for self-attention cache\n", __func__);
+        WHISPER_LOG_ERROR("whisper_kv_cache_init() failed for self-attention cache");
         whisper_free_state(state);
         return nullptr;
     }
 
     {
         const size_t memory_size = ggml_nbytes(state->kv_self.k) + ggml_nbytes(state->kv_self.v);
-        WHISPER_LOG_INFO("%s: kv self size  = %7.2f MB\n", __func__, memory_size / 1e6);
+        WHISPER_LOG_INFO("kv self size  = %7.2f MB", memory_size / 1e6);
     }
 
     if (!whisper_kv_cache_init(state->kv_cross, state->backends[0], ctx->itype,
                 ctx->model.hparams.n_text_state,
                 ctx->model.hparams.n_text_layer,
                 GGML_PAD(ctx->model.hparams.n_audio_ctx, 256))) {
-        WHISPER_LOG_ERROR("%s: whisper_kv_cache_init() failed for cross-attention cache\n", __func__);
+        WHISPER_LOG_ERROR("whisper_kv_cache_init() failed for cross-attention cache");
         whisper_free_state(state);
         return nullptr;
     }
 
     {
         const size_t memory_size = ggml_nbytes(state->kv_cross.k) + ggml_nbytes(state->kv_cross.v);
-        WHISPER_LOG_INFO("%s: kv cross size = %7.2f MB\n", __func__, memory_size / 1e6);
+        WHISPER_LOG_INFO("kv cross size = %7.2f MB", memory_size / 1e6);
     }
 
     if (!whisper_kv_cache_init(state->kv_pad, state->backends[0], ctx->itype,
                 ctx->model.hparams.n_audio_state,
                 1,
                 GGML_PAD(ctx->model.hparams.n_audio_ctx, 256))) {
-        WHISPER_LOG_ERROR("%s: whisper_kv_cache_init() failed for self-attention cache\n", __func__);
+        WHISPER_LOG_ERROR("whisper_kv_cache_init() failed for self-attention cache");
         whisper_free_state(state);
         return nullptr;
     }
 
     {
         const size_t memory_size = ggml_nbytes(state->kv_pad.k) + ggml_nbytes(state->kv_pad.v);
-        WHISPER_LOG_INFO("%s: kv pad  size  = %7.2f MB\n", __func__, memory_size / 1e6);
+        WHISPER_LOG_INFO("kv pad  size  = %7.2f MB", memory_size / 1e6);
     }
 
     // [EXPERIMENTAL] Token-level timestamps with DTW
     if (ctx->params.dtw_token_timestamps) {
         if (!aheads_masks_init(ctx->params, ctx->model.hparams, state->aheads_masks, state->backends[0])) {
-            WHISPER_LOG_ERROR("%s: aheads_masks_init() failed for alignment heads masks\n", __func__);
+            WHISPER_LOG_ERROR("aheads_masks_init() failed for alignment heads masks");
             whisper_free_state(state);
             return nullptr;
         }
         const size_t memory_size = aheads_masks_nbytes(state->aheads_masks);
-        WHISPER_LOG_INFO("%s: alignment heads masks size = %ld B\n", __func__, memory_size);
+        WHISPER_LOG_INFO("alignment heads masks size = %ld B", memory_size);
     }
 
 #ifdef WHISPER_USE_COREML
@@ -3508,12 +3542,12 @@ struct whisper_state * whisper_init_state(whisper_context * ctx, const char *mod
                 });
 
         if (!ok) {
-            WHISPER_LOG_ERROR("%s: failed to init conv allocator\n", __func__);
+            WHISPER_LOG_ERROR("failed to init conv allocator");
             whisper_free_state(state);
             return nullptr;
         }
 
-        WHISPER_LOG_INFO("%s: compute buffer (conv)   = %7.2f MB\n", __func__, whisper_sched_size(state->sched_conv) / 1e6);
+        WHISPER_LOG_INFO("compute buffer (conv)   = %7.2f MB", whisper_sched_size(state->sched_conv) / 1e6);
     }
 
     // encoder allocator
@@ -3524,12 +3558,12 @@ struct whisper_state * whisper_init_state(whisper_context * ctx, const char *mod
                 });
 
         if (!ok) {
-            WHISPER_LOG_ERROR("%s: failed to init encoder allocator\n", __func__);
+            WHISPER_LOG_ERROR("failed to init encoder allocator");
             whisper_free_state(state);
             return nullptr;
         }
 
-        WHISPER_LOG_INFO("%s: compute buffer (encode) = %7.2f MB\n", __func__, whisper_sched_size(state->sched_encode) / 1e6);
+        WHISPER_LOG_INFO("compute buffer (encode) = %7.2f MB", whisper_sched_size(state->sched_encode) / 1e6);
     }
 
     // cross allocator
@@ -3540,12 +3574,12 @@ struct whisper_state * whisper_init_state(whisper_context * ctx, const char *mod
                 });
 
         if (!ok) {
-            WHISPER_LOG_ERROR("%s: failed to init cross allocator\n", __func__);
+            WHISPER_LOG_ERROR("failed to init cross allocator");
             whisper_free_state(state);
             return nullptr;
         }
 
-        WHISPER_LOG_INFO("%s: compute buffer (cross)  = %7.2f MB\n", __func__, whisper_sched_size(state->sched_cross) / 1e6);
+        WHISPER_LOG_INFO("compute buffer (cross)  = %7.2f MB", whisper_sched_size(state->sched_cross) / 1e6);
     }
 
     // decoder allocator
@@ -3564,12 +3598,12 @@ struct whisper_state * whisper_init_state(whisper_context * ctx, const char *mod
                 });
 
         if (!ok) {
-            WHISPER_LOG_ERROR("%s: failed to init decoder allocator\n", __func__);
+            WHISPER_LOG_ERROR("failed to init decoder allocator");
             whisper_free_state(state);
             return nullptr;
         }
 
-        WHISPER_LOG_INFO("%s: compute buffer (decode) = %7.2f MB\n", __func__, whisper_sched_size(state->sched_decode) / 1e6);
+        WHISPER_LOG_INFO("compute buffer (decode) = %7.2f MB", whisper_sched_size(state->sched_decode) / 1e6);
     }
 
     return state;
@@ -3589,7 +3623,7 @@ int whisper_ctx_init_openvino_encoder(
     return 1;
 #else
     if (!model_path && ctx->path_model.empty()) {
-        WHISPER_LOG_ERROR("%s: model_path is nullptr, and ctx has no model_path set.\n", __func__);
+        WHISPER_LOG_ERROR("model_path is nullptr, and ctx has no model_path set.");
         return 1;
     }
 
@@ -3609,15 +3643,15 @@ int whisper_ctx_init_openvino_encoder(
         path_cache = cache_dir;
     }
 
-    WHISPER_LOG_INFO("%s: loading OpenVINO model from '%s'\n", __func__, path_encoder.c_str());
-    WHISPER_LOG_INFO("%s: first run on a device may take a while ...\n", __func__);
+    WHISPER_LOG_INFO("loading OpenVINO model from '%s'", path_encoder.c_str());
+    WHISPER_LOG_INFO("first run on a device may take a while ...");
 
     ctx->state->ctx_openvino = whisper_openvino_init(path_encoder.c_str(), device, path_cache.c_str());
     if (!ctx->state->ctx_openvino) {
-        WHISPER_LOG_ERROR("%s: failed to init OpenVINO encoder from '%s'\n", __func__, path_encoder.c_str());
+        WHISPER_LOG_ERROR("failed to init OpenVINO encoder from '%s'", path_encoder.c_str());
         return 1;
     } else {
-        WHISPER_LOG_INFO("%s: OpenVINO model loaded\n", __func__);
+        WHISPER_LOG_INFO("OpenVINO model loaded");
     }
 
     return 0;
@@ -3643,7 +3677,7 @@ struct whisper_context_params whisper_context_default_params() {
 }
 
 struct whisper_context * whisper_init_from_file_with_params_no_state(const char * path_model, struct whisper_context_params params) {
-    WHISPER_LOG_INFO("%s: loading model from '%s'\n", __func__, path_model);
+    WHISPER_LOG_INFO("loading model from '%s'", path_model);
 #ifdef _MSC_VER
     // Convert UTF-8 path to wide string (UTF-16) for Windows, resolving character encoding issues.
     std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
@@ -3653,7 +3687,7 @@ struct whisper_context * whisper_init_from_file_with_params_no_state(const char 
     auto fin = std::ifstream(path_model, std::ios::binary);
 #endif
     if (!fin) {
-        WHISPER_LOG_ERROR("%s: failed to open '%s'\n", __func__, path_model);
+        WHISPER_LOG_ERROR("failed to open '%s'", path_model);
         return nullptr;
     }
 
@@ -3695,7 +3729,7 @@ struct whisper_context * whisper_init_from_buffer_with_params_no_state(void * bu
 
     buf_context ctx = { reinterpret_cast<uint8_t*>(buffer), buffer_size, 0 };
 
-    WHISPER_LOG_INFO("%s: loading model from buffer\n", __func__);
+    WHISPER_LOG_INFO("loading model from buffer");
 
     whisper_model_loader loader = {};
 
@@ -3727,21 +3761,21 @@ struct whisper_context * whisper_init_with_params_no_state(struct whisper_model_
     ggml_time_init();
 
     if (params.flash_attn && params.dtw_token_timestamps) {
-        WHISPER_LOG_WARN("%s: dtw_token_timestamps is not supported with flash_attn - disabling\n", __func__);
+        WHISPER_LOG_WARN("dtw_token_timestamps is not supported with flash_attn - disabling");
         params.dtw_token_timestamps = false;
     }
 
-    WHISPER_LOG_INFO("%s: use gpu    = %d\n", __func__, params.use_gpu);
-    WHISPER_LOG_INFO("%s: flash attn = %d\n", __func__, params.flash_attn);
-    WHISPER_LOG_INFO("%s: gpu_device = %d\n", __func__, params.gpu_device);
-    WHISPER_LOG_INFO("%s: dtw        = %d\n", __func__, params.dtw_token_timestamps);
+    WHISPER_LOG_INFO("use gpu    = %d", params.use_gpu);
+    WHISPER_LOG_INFO("flash attn = %d", params.flash_attn);
+    WHISPER_LOG_INFO("gpu_device = %d", params.gpu_device);
+    WHISPER_LOG_INFO("dtw        = %d", params.dtw_token_timestamps);
 
     whisper_context * ctx = new whisper_context;
     ctx->params = params;
 
     if (!whisper_model_load(loader, *ctx)) {
         loader->close(loader->context);
-        WHISPER_LOG_ERROR("%s: failed to load model\n", __func__);
+        WHISPER_LOG_ERROR("failed to load model");
         delete ctx;
         return nullptr;
     }
@@ -3935,7 +3969,7 @@ int whisper_set_mel_with_state(
                            int   n_len,
                            int   n_mel) {
     if (n_mel != ctx->model.filters.n_mel) {
-        WHISPER_LOG_ERROR("%s: invalid number of mel bands: %d (expected %d)\n", __func__, n_mel, ctx->model.filters.n_mel);
+        WHISPER_LOG_ERROR("invalid number of mel bands: %d (expected %d)", n_mel, ctx->model.filters.n_mel);
         return -1;
     }
 
@@ -3957,7 +3991,7 @@ int whisper_set_mel(
 
 int whisper_encode_with_state(struct whisper_context * ctx, struct whisper_state * state, int offset, int n_threads) {
     if (!whisper_encode_internal(*ctx, *state, offset, n_threads, nullptr, nullptr)) {
-        WHISPER_LOG_ERROR("%s: failed to eval\n", __func__);
+        WHISPER_LOG_ERROR("failed to eval");
         return -1;
     }
 
@@ -3966,7 +4000,7 @@ int whisper_encode_with_state(struct whisper_context * ctx, struct whisper_state
 
 int whisper_encode(struct whisper_context * ctx, int offset, int n_threads) {
     if (!whisper_encode_internal(*ctx, *ctx->state, offset, n_threads, nullptr, nullptr)) {
-        WHISPER_LOG_ERROR("%s: failed to eval\n", __func__);
+        WHISPER_LOG_ERROR("failed to eval");
         return -1;
     }
 
@@ -3979,7 +4013,7 @@ int whisper_decode_with_state(struct whisper_context * ctx, struct whisper_state
     whisper_kv_cache_seq_rm(state->kv_self, 0, n_past, -1);
 
     if (!whisper_decode_internal(*ctx, *state, state->batch, n_threads, false, nullptr, nullptr)) {
-        WHISPER_LOG_ERROR("%s: failed to eval\n", __func__);
+        WHISPER_LOG_ERROR("failed to eval\n");
         return 1;
     }
 
@@ -3988,7 +4022,7 @@ int whisper_decode_with_state(struct whisper_context * ctx, struct whisper_state
 
 int whisper_decode(struct whisper_context * ctx, const whisper_token * tokens, int n_tokens, int n_past, int n_threads) {
     if (ctx->state == nullptr) {
-        WHISPER_LOG_ERROR("%s: ERROR state was not loaded.\n", __func__);
+        WHISPER_LOG_ERROR("ERROR state was not loaded.");
         return -1;
     }
 
@@ -3999,7 +4033,7 @@ int whisper_tokenize(struct whisper_context * ctx, const char * text, whisper_to
     const auto res = tokenize(ctx->vocab, text);
 
     if (n_max_tokens < (int) res.size()) {
-        WHISPER_LOG_ERROR("%s: too many resulting tokens: %d (max %d)\n", __func__, (int) res.size(), n_max_tokens);
+        WHISPER_LOG_ERROR("too many resulting tokens: %d (max %d)", (int) res.size(), n_max_tokens);
         return -(int) res.size();
     }
 
@@ -4031,7 +4065,7 @@ int whisper_lang_id(const char * lang) {
             }
         }
 
-        WHISPER_LOG_ERROR("%s: unknown language '%s'\n", __func__, lang);
+        WHISPER_LOG_ERROR("unknown language '%s'", lang);
         return -1;
     }
     return g_lang.at(lang).first;
@@ -4044,7 +4078,7 @@ const char * whisper_lang_str(int id) {
         }
     }
 
-    WHISPER_LOG_ERROR("%s: unknown language id %d\n", __func__, id);
+    WHISPER_LOG_ERROR("unknown language id %d", id);
     return nullptr;
 }
 
@@ -4055,7 +4089,7 @@ const char * whisper_lang_str_full(int id) {
         }
     }
 
-    WHISPER_LOG_ERROR("%s: unknown language id %d\n", __func__, id);
+    WHISPER_LOG_ERROR("unknown language id %d", id);
     return nullptr;
 }
 
@@ -4068,25 +4102,25 @@ int whisper_lang_auto_detect_with_state(
     const int seek = offset_ms/10;
 
     if (seek < 0) {
-        WHISPER_LOG_ERROR("%s: offset %dms is before the start of the audio\n", __func__, offset_ms);
+        WHISPER_LOG_ERROR("offset %dms is before the start of the audio", offset_ms);
         return -1;
     }
 
     if (seek >= state->mel.n_len_org) {
-        WHISPER_LOG_ERROR("%s: offset %dms is past the end of the audio (%dms)\n", __func__, offset_ms, state->mel.n_len_org*10);
+        WHISPER_LOG_ERROR("offset %dms is past the end of the audio (%dms)", offset_ms, state->mel.n_len_org*10);
         return -2;
     }
 
     // run the encoder
     if (whisper_encode_with_state(ctx, state, seek, n_threads) != 0) {
-        WHISPER_LOG_ERROR("%s: failed to encode\n", __func__);
+        WHISPER_LOG_ERROR("failed to encode");
         return -6;
     }
 
     const std::vector<whisper_token> prompt = { whisper_token_sot(ctx) };
 
     if (whisper_decode_with_state(ctx, state, prompt.data(), prompt.size(), 0, n_threads) != 0) {
-        WHISPER_LOG_ERROR("%s: failed to decode\n", __func__);
+        WHISPER_LOG_ERROR("failed to decode");
         return -7;
     }
 
@@ -4126,8 +4160,7 @@ int whisper_lang_auto_detect_with_state(
             if (lang_probs) {
                 lang_probs[prob.second] = prob.first;
             }
-
-            //printf("%s: lang %2d (%3s): %f\n", __func__, prob.second, whisper_lang_str(prob.second), prob.first);
+            // WHISPER_LOG_DEBIG("lang %2d (%3s): %f", prob.second, whisper_lang_str(prob.second), prob.first);
         }
     }
 
@@ -4288,10 +4321,10 @@ void whisper_print_timings(struct whisper_context * ctx) {
 }
 
 void whisper_print_timings_from_state(struct whisper_context * ctx, struct whisper_state * state) {
+    (void)state;
     const int64_t t_end_us = ggml_time_us();
 
-    WHISPER_LOG_INFO("\n");
-    WHISPER_LOG_INFO("%s:     load time = %8.2f ms\n", __func__, ctx->t_load_us / 1000.0f);
+    WHISPER_LOG_INFO("     load time = %8.2f ms", ctx->t_load_us / 1000.0f);
     if (ctx->state != nullptr) {
 
         const int32_t n_sample = std::max(1, ctx->state->n_sample);
@@ -4300,15 +4333,15 @@ void whisper_print_timings_from_state(struct whisper_context * ctx, struct whisp
         const int32_t n_batchd = std::max(1, ctx->state->n_batchd);
         const int32_t n_prompt = std::max(1, ctx->state->n_prompt);
 
-        WHISPER_LOG_INFO("%s:     fallbacks = %3d p / %3d h\n", __func__, ctx->state->n_fail_p, ctx->state->n_fail_h);
-        WHISPER_LOG_INFO("%s:      mel time = %8.2f ms\n", __func__, ctx->state->t_mel_us / 1000.0f);
-        WHISPER_LOG_INFO("%s:   sample time = %8.2f ms / %5d runs (%8.2f ms per run)\n", __func__, 1e-3f * ctx->state->t_sample_us, n_sample, 1e-3f * ctx->state->t_sample_us / n_sample);
-        WHISPER_LOG_INFO("%s:   encode time = %8.2f ms / %5d runs (%8.2f ms per run)\n", __func__, 1e-3f * ctx->state->t_encode_us, n_encode, 1e-3f * ctx->state->t_encode_us / n_encode);
-        WHISPER_LOG_INFO("%s:   decode time = %8.2f ms / %5d runs (%8.2f ms per run)\n", __func__, 1e-3f * ctx->state->t_decode_us, n_decode, 1e-3f * ctx->state->t_decode_us / n_decode);
-        WHISPER_LOG_INFO("%s:   batchd time = %8.2f ms / %5d runs (%8.2f ms per run)\n", __func__, 1e-3f * ctx->state->t_batchd_us, n_batchd, 1e-3f * ctx->state->t_batchd_us / n_batchd);
-        WHISPER_LOG_INFO("%s:   prompt time = %8.2f ms / %5d runs (%8.2f ms per run)\n", __func__, 1e-3f * ctx->state->t_prompt_us, n_prompt, 1e-3f * ctx->state->t_prompt_us / n_prompt);
+        WHISPER_LOG_INFO("   fallbacks = %3d p / %3d h", ctx->state->n_fail_p, ctx->state->n_fail_h);
+        WHISPER_LOG_INFO("   mel time = %8.2f ms", ctx->state->t_mel_us / 1000.0f);
+        WHISPER_LOG_INFO("   sample time = %8.2f ms / %5d runs (%8.2f ms per run)", 1e-3f * ctx->state->t_sample_us, n_sample, 1e-3f * ctx->state->t_sample_us / n_sample);
+        WHISPER_LOG_INFO("   encode time = %8.2f ms / %5d runs (%8.2f ms per run)", 1e-3f * ctx->state->t_encode_us, n_encode, 1e-3f * ctx->state->t_encode_us / n_encode);
+        WHISPER_LOG_INFO("   decode time = %8.2f ms / %5d runs (%8.2f ms per run)", 1e-3f * ctx->state->t_decode_us, n_decode, 1e-3f * ctx->state->t_decode_us / n_decode);
+        WHISPER_LOG_INFO("   batchd time = %8.2f ms / %5d runs (%8.2f ms per run)", 1e-3f * ctx->state->t_batchd_us, n_batchd, 1e-3f * ctx->state->t_batchd_us / n_batchd);
+        WHISPER_LOG_INFO("   prompt time = %8.2f ms / %5d runs (%8.2f ms per run)", 1e-3f * ctx->state->t_prompt_us, n_prompt, 1e-3f * ctx->state->t_prompt_us / n_prompt);
     }
-    WHISPER_LOG_INFO("%s:    total time = %8.2f ms\n", __func__, (t_end_us - ctx->t_start_us)/1000.0f);
+    WHISPER_LOG_INFO("    total time = %8.2f ms", (t_end_us - ctx->t_start_us)/1000.0f);
 }
 
 void whisper_reset_timings(struct whisper_context * ctx) {
@@ -4316,6 +4349,7 @@ void whisper_reset_timings(struct whisper_context * ctx) {
 }
 
 void whisper_reset_timings_from_state(struct whisper_context * ctx, struct whisper_state * state) {
+    (void)state;
     ctx->t_start_us = ggml_time_us();
     if (ctx->state != nullptr) {
         ctx->state->t_mel_us = 0;
@@ -4760,7 +4794,7 @@ static void whisper_suppress_invalid_grammar(
     //if (!allow_eot) {
     //    logits[eot] -= params.grammar_penalty;
     //}
-    //fprintf(stderr, "Allowed: (%zu tokens)\n", size - rejects.size());
+    //WHISPER_LOG_ERROR("Allowed: (%zu tokens)", size - rejects.size());
 }
 
 static void whisper_grammar_accept_token(whisper_context & ctx, whisper_grammar & grammar, whisper_token token) {
@@ -4768,15 +4802,14 @@ static void whisper_grammar_accept_token(whisper_context & ctx, whisper_grammar 
         return;
     }
 
-    //fprintf(stderr, "Accept: '%s'\n", ctx.vocab.id_to_token[token].c_str());
+    //WHISPER_LOG_ERROR("Accept: '%s'", ctx.vocab.id_to_token[token].c_str());
 
     const std::string & text = ctx.vocab.id_to_token[token];
 
     if (text.rfind("[_", 0) == 0) {
-        // fprintf(stderr, " (skipped)\n");
+        // WHISPER_LOG_ERROR(" (skipped)");
         return;
     }
-    // fprintf(stderr, "\n");
 
     // Note terminating 0 in decoded string
     const auto   decoded     = decode_utf8(text.c_str(), grammar.partial_utf8);
@@ -5132,7 +5165,7 @@ static void whisper_process_logits(
             const bool last_was_timestamp        = tokens_cur.size() > 0 && tokens_cur.back().id >= vocab.token_beg;
             const bool penultimate_was_timestamp = tokens_cur.size() < 2 || tokens_cur[tokens_cur.size() - 2].id >= vocab.token_beg;
 
-            //WHISPER_LOG_INFO("last_was_timestamp=%d penultimate_was_timestamp=%d\n", last_was_timestamp, penultimate_was_timestamp);
+            //WHISPER_LOG_INFO("last_was_timestamp=%d penultimate_was_timestamp=%d", last_was_timestamp, penultimate_was_timestamp);
 
             if (last_was_timestamp) {
                 if (penultimate_was_timestamp) {
@@ -5208,7 +5241,7 @@ static void whisper_process_logits(
 
             const float max_text_token_logprob = *std::max_element(logprobs.begin(), logprobs.begin() + vocab.token_beg);
 
-            //WHISPER_LOG_INFO("timestamp_logprob=%f max_text_token_logprob=%f\n", timestamp_logprob, max_text_token_logprob);
+            //WHISPER_LOG_INFO("timestamp_logprob=%f max_text_token_logprob=%f", timestamp_logprob, max_text_token_logprob);
 
             if (timestamp_logprob > max_text_token_logprob) {
                 for (int i = 0; i < vocab.token_beg; ++i) {
@@ -5261,7 +5294,7 @@ static void whisper_process_logits(
     //    const auto prob    = probs[i];
     //    const auto logit   = logits[i];
     //    const auto logprob = logprobs[i];
-    //    printf("%16s : prob=%9.5f logit=%9.5f logprob=%9.5f\n", token.c_str(), prob, logit, logprob);
+    //    WHISPER_LOG_DEBUG("%16s : prob=%9.5f logit=%9.5f logprob=%9.5f", token.c_str(), prob, logit, logprob);
     //}
 
     // print sorted
@@ -5281,30 +5314,30 @@ static void whisper_process_logits(
             const auto prob    = pairs[i].first;
             const auto logit   = logits[pairs[i].second];
             const auto logprob = logprobs[pairs[i].second];
-            printf("%16s : id=%6d prob=%9.5f logit=%9.5f logprob=%9.5f '%s'\n", token.c_str(), pairs[i].second, prob, logit, logprob, token.c_str());
+            WHISPER_LOG_DEBUG("%16s : id=%6d prob=%9.5f logit=%9.5f logprob=%9.5f '%s'", token.c_str(), pairs[i].second, prob, logit, logprob, token.c_str());
         }
 
-        printf("----------------\n");
+        WHISPER_LOG_DEBUG("----------------");
     }
 
     // "And", "and", " And", " and"
-    //printf("logits[\"and\"]  = %f\n", logits[vocab.token_to_id.at("and")]);
-    //printf("logits[\"And\"]  = %f\n", logits[vocab.token_to_id.at("And")]);
-    //printf("logits[\" and\"] = %f\n", logits[vocab.token_to_id.at(" and")]);
-    //printf("logits[\" And\"] = %f\n", logits[vocab.token_to_id.at(" And")]);
-    //printf("logits[\" so\"]  = %f\n", logits[vocab.token_to_id.at(" so")]);
+    //WHISPER_LOG_DEBUG("logits[\"and\"]  = %f", logits[vocab.token_to_id.at("and")]);
+    //WHISPER_LOG_DEBUG("logits[\"And\"]  = %f", logits[vocab.token_to_id.at("And")]);
+    //WHISPER_LOG_DEBUG("logits[\" and\"] = %f", logits[vocab.token_to_id.at(" and")]);
+    //WHISPER_LOG_DEBUG("logits[\" And\"] = %f", logits[vocab.token_to_id.at(" And")]);
+    //WHISPER_LOG_DEBUG("logits[\" so\"]  = %f", logits[vocab.token_to_id.at(" so")]);
 
-    //printf("logprobs[\"and\"]  = %f\n", logprobs[vocab.token_to_id.at("and")]);
-    //printf("logprobs[\"And\"]  = %f\n", logprobs[vocab.token_to_id.at("And")]);
-    //printf("logprobs[\" and\"] = %f\n", logprobs[vocab.token_to_id.at(" and")]);
-    //printf("logprobs[\" And\"] = %f\n", logprobs[vocab.token_to_id.at(" And")]);
-    //printf("logprobs[\" so\"]  = %f\n", logprobs[vocab.token_to_id.at(" so")]);
+    //WHISPER_LOG_DEBUG("logprobs[\"and\"]  = %f", logprobs[vocab.token_to_id.at("and")]);
+    //WHISPER_LOG_DEBUG("logprobs[\"And\"]  = %f", logprobs[vocab.token_to_id.at("And")]);
+    //WHISPER_LOG_DEBUG("logprobs[\" and\"] = %f", logprobs[vocab.token_to_id.at(" and")]);
+    //WHISPER_LOG_DEBUG("logprobs[\" And\"] = %f", logprobs[vocab.token_to_id.at(" And")]);
+    //WHISPER_LOG_DEBUG("logprobs[\" so\"]  = %f", logprobs[vocab.token_to_id.at(" so")]);
 
-    //printf("probs[\"and\"]  = %f\n", probs[vocab.token_to_id.at("and")]);
-    //printf("probs[\"And\"]  = %f\n", probs[vocab.token_to_id.at("And")]);
-    //printf("probs[\" and\"] = %f\n", probs[vocab.token_to_id.at(" and")]);
-    //printf("probs[\" And\"] = %f\n", probs[vocab.token_to_id.at(" And")]);
-    //printf("probs[\" so\"]  = %f\n", probs[vocab.token_to_id.at(" so")]);
+    //WHISPER_LOG_DEBUG("probs[\"and\"]  = %f", probs[vocab.token_to_id.at("and")]);
+    //WHISPER_LOG_DEBUG("probs[\"And\"]  = %f", probs[vocab.token_to_id.at("And")]);
+    //WHISPER_LOG_DEBUG("probs[\" and\"] = %f", probs[vocab.token_to_id.at(" and")]);
+    //WHISPER_LOG_DEBUG("probs[\" And\"] = %f", probs[vocab.token_to_id.at(" And")]);
+    //WHISPER_LOG_DEBUG("probs[\" so\"]  = %f", probs[vocab.token_to_id.at(" so")]);
 #endif
 }
 
@@ -5442,7 +5475,7 @@ static std::vector<whisper_token_data> whisper_sample_token_topk(
 
     for (int i = 0; i < k; ++i) {
         const auto id = dist(decoder.rng);
-        //printf("XXX %d %d %f %f %f %f\n", id, tid, probs[id], logprobs[id], pt, ptsum);
+        //WHISPER_LOG_DEBUG("%d %d %f %f %f %f", id, tid, probs[id], logprobs[id], pt, ptsum);
 
         result.push_back({ id, tid, probs[id], logprobs[id], pt, ptsum, -1, -1, -1, 0.0f, });
 
@@ -5497,7 +5530,7 @@ static void whisper_sequence_score(
             const auto p = kv.second/(double)cnt;
             entropy -= p*log(p);
 
-            //WHISPER_LOG_DEBUG("entropy: %d %f %f, count %d\n", kv.first, p, log(p), kv.second);
+            //WHISPER_LOG_DEBUG("entropy: %d %f %f, count %d", kv.first, p, log(p), kv.second);
         }
 
         sequence.entropy = entropy;
@@ -5518,7 +5551,7 @@ int whisper_full_with_state(
     if (n_samples > 0) {
         // compute log mel spectrogram
         if (whisper_pcm_to_mel_with_state(ctx, state, samples, n_samples, params.n_threads) != 0) {
-            WHISPER_LOG_ERROR("%s: failed to compute log mel spectrogram\n", __func__);
+            WHISPER_LOG_ERROR("failed to compute log mel spectrogram");
             return -2;
         }
     }
@@ -5529,13 +5562,13 @@ int whisper_full_with_state(
 
         const auto lang_id = whisper_lang_auto_detect_with_state(ctx, state, 0, params.n_threads, probs.data());
         if (lang_id < 0) {
-            WHISPER_LOG_ERROR("%s: failed to auto-detect language\n", __func__);
+            WHISPER_LOG_ERROR("failed to auto-detect language");
             return -3;
         }
         state->lang_id = lang_id;
         params.language = whisper_lang_str(lang_id);
 
-        WHISPER_LOG_INFO("%s: auto-detected language: %s (p = %f)\n", __func__, params.language, probs[whisper_lang_id(params.language)]);
+        WHISPER_LOG_INFO("auto-detected language: %s (p = %f)", params.language, probs[whisper_lang_id(params.language)]);
         if (params.detect_language) {
             return 0;
         }
@@ -5557,7 +5590,7 @@ int whisper_full_with_state(
     // basically don't process anything that is less than 1.0s
     // see issue #39: https://github.com/ggerganov/whisper.cpp/issues/39
     if (seek_end < seek_start + 100) {
-        WHISPER_LOG_WARN("%s: input is too short - %d ms < 1000 ms. consider padding the input audio with silence\n", __func__, (seek_end - seek_start)*10);
+        WHISPER_LOG_WARN("input is too short - %d ms < 1000 ms. consider padding the input audio with silence", (seek_end - seek_start)*10);
         return 0;
     }
 
@@ -5589,7 +5622,7 @@ int whisper_full_with_state(
     n_decoders = std::max(1, n_decoders);
 
     if (n_decoders > WHISPER_MAX_DECODERS) {
-        WHISPER_LOG_ERROR("%s: too many decoders requested (%d), max = %d\n", __func__, n_decoders, WHISPER_MAX_DECODERS);
+        WHISPER_LOG_ERROR("too many decoders requested (%d), max = %d", n_decoders, WHISPER_MAX_DECODERS);
         return -4;
     }
 
@@ -5642,7 +5675,7 @@ int whisper_full_with_state(
 
     // overwrite audio_ctx, max allowed is hparams.n_audio_ctx
     if (params.audio_ctx > whisper_n_audio_ctx(ctx)) {
-        WHISPER_LOG_ERROR("%s: audio_ctx is larger than the maximum allowed (%d > %d)\n", __func__, params.audio_ctx, whisper_n_audio_ctx(ctx));
+        WHISPER_LOG_ERROR("audio_ctx is larger than the maximum allowed (%d > %d)", params.audio_ctx, whisper_n_audio_ctx(ctx));
         return -5;
     }
     state->exp_n_audio_ctx = params.audio_ctx;
@@ -5665,7 +5698,7 @@ int whisper_full_with_state(
     {
         const bool is_distil = ctx->model.hparams.n_text_layer == 2 && ctx->model.hparams.n_vocab != 51866;
         if (is_distil && !params.no_timestamps) {
-            WHISPER_LOG_WARN("%s: using first release distilled models - forcing no_timestamps\n", __func__);
+            WHISPER_LOG_WARN("using first release distilled models - forcing no_timestamps");
             params.no_timestamps = true;
         }
     }
@@ -5708,14 +5741,14 @@ int whisper_full_with_state(
 
         if (params.encoder_begin_callback) {
             if (params.encoder_begin_callback(ctx, state, params.encoder_begin_callback_user_data) == false) {
-                WHISPER_LOG_ERROR("%s: encoder_begin_callback returned false - aborting\n", __func__);
+                WHISPER_LOG_ERROR("encoder_begin_callback returned false - aborting");
                 break;
             }
         }
 
         // encode audio features starting at offset seek
         if (!whisper_encode_internal(*ctx, *state, seek, params.n_threads, params.abort_callback, params.abort_callback_user_data)) {
-            WHISPER_LOG_ERROR("%s: failed to encode\n", __func__);
+            WHISPER_LOG_ERROR("failed to encode");
             return -6;
         }
 
@@ -5751,7 +5784,7 @@ int whisper_full_with_state(
 
             n_decoders_cur = std::max(1, n_decoders_cur);
 
-            WHISPER_LOG_DEBUG("\n%s: strategy = %d, decoding with %d decoders, temperature = %.2f\n", __func__, params.strategy, n_decoders_cur, t_cur);
+            WHISPER_LOG_DEBUG("strategy = %d, decoding with %d decoders, temperature = %.2f", params.strategy, n_decoders_cur, t_cur);
 
             // TAGS: WHISPER_DECODER_INIT
             for (int j = 0; j < n_decoders_cur; ++j) {
@@ -5795,18 +5828,18 @@ int whisper_full_with_state(
                 prompt.insert(prompt.end(), prompt_init.begin(), prompt_init.end());
 
                 // print the prompt
-                WHISPER_LOG_DEBUG("\n\n");
+                WHISPER_LOG_DEBUG("\n");
                 for (int i = 0; i < (int) prompt.size(); i++) {
-                    WHISPER_LOG_DEBUG("%s: prompt[%d] = %s\n", __func__, i, ctx->vocab.id_to_token.at(prompt[i]).c_str());
+                    WHISPER_LOG_DEBUG("prompt[%d] = %s", i, ctx->vocab.id_to_token.at(prompt[i]).c_str());
                 }
-                WHISPER_LOG_DEBUG("\n\n");
+                WHISPER_LOG_DEBUG("\n");
 
                 whisper_kv_cache_clear(state->kv_self);
 
                 whisper_batch_prep_legacy(state->batch, prompt.data(), prompt.size(), 0, 0);
 
                 if (!whisper_decode_internal(*ctx, *state, state->batch, params.n_threads, false, params.abort_callback, params.abort_callback_user_data)) {
-                    WHISPER_LOG_ERROR("%s: failed to decode\n", __func__);
+                    WHISPER_LOG_ERROR("failed to decode");
                     return -7;
                 }
 
@@ -5950,8 +5983,8 @@ int whisper_full_with_state(
 
                         whisper_kv_cache_seq_cp(state->kv_self, cur.decoder_idx, WHISPER_MAX_DECODERS + j, -1, -1);
 
-                        WHISPER_LOG_DEBUG("%s: beam search: decoder %d: from decoder %d: token = %10s, plog = %8.5f, sum_logprobs = %8.5f\n",
-                                __func__, j, cur.decoder_idx, ctx->vocab.id_to_token.at(decoder.sequence.tokens.back().id).c_str(), decoder.sequence.tokens.back().plog, decoder.sequence.sum_logprobs_all);
+                        WHISPER_LOG_DEBUG("beam search: decoder %d: from decoder %d: token = %10s, plog = %8.5f, sum_logprobs = %8.5f",
+                                j, cur.decoder_idx, ctx->vocab.id_to_token.at(decoder.sequence.tokens.back().id).c_str(), decoder.sequence.tokens.back().plog, decoder.sequence.sum_logprobs_all);
                     }
 
                     for (int j = 0; j < n_decoders_cur; ++j) {
@@ -5993,7 +6026,7 @@ int whisper_full_with_state(
 
                             // do not allow to go back in time
                             if (has_ts && seek_delta > seek_delta_new && result_len < i) {
-                                WHISPER_LOG_DEBUG("%s: decoder %d: failed due to seek_delta (%d > %d)\n", __func__, j, seek_delta, seek_delta_new);
+                                WHISPER_LOG_DEBUG("decoder %d: failed due to seek_delta (%d > %d)", j, seek_delta, seek_delta_new);
                                 failed = true; // TODO: maybe this is not a failure ?
                                 continue;
                             }
@@ -6008,8 +6041,8 @@ int whisper_full_with_state(
 #ifdef WHISPER_DEBUG
                         {
                             const auto tt = token.pt > 0.10 ? ctx->vocab.id_to_token.at(token.tid) : "[?]";
-                            WHISPER_LOG_DEBUG("%s: id = %3d, decoder = %d, token = %6d, p = %6.3f, ts = %10s, %6.3f, result_len = %4d '%s'\n",
-                                    __func__, i, j, token.id, token.p, tt.c_str(), token.pt, result_len, ctx->vocab.id_to_token.at(token.id).c_str());
+                            WHISPER_LOG_DEBUG("id = %3d, decoder = %d, token = %6d, p = %6.3f, ts = %10s, %6.3f, result_len = %4d '%s'",
+                                    i, j, token.id, token.p, tt.c_str(), token.pt, result_len, ctx->vocab.id_to_token.at(token.id).c_str());
                         }
 #endif
 
@@ -6022,7 +6055,7 @@ int whisper_full_with_state(
                                 if (seek + seek_delta + 100 >= seek_end) {
                                     result_len = i + 1;
                                 } else {
-                                    WHISPER_LOG_DEBUG("%s: decoder %d failed (result_len = 0)\n", __func__, j);
+                                    WHISPER_LOG_DEBUG("decoder %d failed (result_len = 0)", j);
                                     failed = true;
                                     continue;
                                 }
@@ -6033,7 +6066,7 @@ int whisper_full_with_state(
                                 seek_delta = 100*WHISPER_CHUNK_SIZE;
                             }
 
-                            WHISPER_LOG_DEBUG("%s: decoder %d completed\n", __func__, j);
+                            WHISPER_LOG_DEBUG("decoder %d completed", j);
                             completed = true;
                             continue;
                         }
@@ -6049,7 +6082,7 @@ int whisper_full_with_state(
                     // sometimes, the decoding can get stuck in a repetition loop
                     // this is an attempt to mitigate such cases - we flag the decoding as failed and use a fallback strategy
                     if (i == n_max - 1 && (result_len == 0 || seek_delta < 100*WHISPER_CHUNK_SIZE/2)) {
-                        WHISPER_LOG_DEBUG("%s: decoder %d: failed due to repetition loop\n", __func__, j);
+                        WHISPER_LOG_DEBUG("decoder %d: failed due to repetition loop", j);
                         failed = true;
                         continue;
                     }
@@ -6091,7 +6124,7 @@ int whisper_full_with_state(
                             continue;
                         }
 
-                        //WHISPER_LOG_DEBUG("%s: decoder %d: token %d, seek_delta %d\n", __func__, j, decoder.sequence.tokens.back().id, decoder.seek_delta);
+                        //WHISPER_LOG_DEBUG("decoder %d: token %d, seek_delta %d", j, decoder.sequence.tokens.back().id, decoder.seek_delta);
 
                         decoder.i_batch = batch.n_tokens;
 
@@ -6106,7 +6139,7 @@ int whisper_full_with_state(
                     assert(batch.n_tokens > 0);
 
                     if (!whisper_decode_internal(*ctx, *state, state->batch, params.n_threads, false, params.abort_callback, params.abort_callback_user_data)) {
-                        WHISPER_LOG_ERROR("%s: failed to decode\n", __func__);
+                        WHISPER_LOG_ERROR("failed to decode");
                         return -8;
                     }
 
@@ -6171,12 +6204,12 @@ int whisper_full_with_state(
                     decoder.sequence.tokens.resize(decoder.sequence.result_len);
                     whisper_sequence_score(params, decoder.sequence);
 
-                    WHISPER_LOG_DEBUG("%s: decoder %2d: score = %8.5f, result_len = %3d, avg_logprobs = %8.5f, entropy = %8.5f\n",
-                            __func__, j, decoder.sequence.score, decoder.sequence.result_len, decoder.sequence.avg_logprobs, decoder.sequence.entropy);
+                    WHISPER_LOG_DEBUG("decoder %2d: score = %8.5f, result_len = %3d, avg_logprobs = %8.5f, entropy = %8.5f",
+                            j, decoder.sequence.score, decoder.sequence.result_len, decoder.sequence.avg_logprobs, decoder.sequence.entropy);
 
                     if (decoder.sequence.result_len > 32 && decoder.sequence.entropy < params.entropy_thold) {
-                        WHISPER_LOG_DEBUG("%s: decoder %2d: failed due to entropy %8.5f < %8.5f\n",
-                                __func__, j, decoder.sequence.entropy, params.entropy_thold);
+                        WHISPER_LOG_DEBUG("decoder %2d: failed due to entropy %8.5f < %8.5f",
+                                j, decoder.sequence.entropy, params.entropy_thold);
 
                         decoder.failed = true;
                         state->n_fail_h++;
@@ -6190,7 +6223,7 @@ int whisper_full_with_state(
                     }
                 }
 
-                WHISPER_LOG_DEBUG("%s: best decoder = %d\n", __func__, best_decoder_id);
+                WHISPER_LOG_DEBUG("best decoder = %d", best_decoder_id);
             }
 
             bool success = true;
@@ -6202,7 +6235,7 @@ int whisper_full_with_state(
                 const auto & decoder = state->decoders[best_decoder_id];
 
                 if (decoder.failed || decoder.sequence.avg_logprobs < params.logprob_thold) {
-                    WHISPER_LOG_DEBUG("%s: failed due to avg_logprobs %8.5f < %8.5f\n", __func__, decoder.sequence.avg_logprobs, params.logprob_thold);
+                    WHISPER_LOG_DEBUG("failed due to avg_logprobs %8.5f < %8.5f", decoder.sequence.avg_logprobs, params.logprob_thold);
                     success = false;
                     state->n_fail_p++;
                 }
@@ -6210,13 +6243,13 @@ int whisper_full_with_state(
 
             if (success) {
                 //for (auto & token : ctx->decoders[best_decoder_id].sequence.tokens) {
-                //    WHISPER_LOG_DEBUG("%s: token = %d, p = %6.3f, pt = %6.3f, ts = %s, str = %s\n", __func__, token.id, token.p, token.pt, ctx->vocab.id_to_token.at(token.tid).c_str(), ctx->vocab.id_to_token.at(token.id).c_str());
+                //    WHISPER_LOG_DEBUG("token = %d, p = %6.3f, pt = %6.3f, ts = %s, str = %s", token.id, token.p, token.pt, ctx->vocab.id_to_token.at(token.tid).c_str(), ctx->vocab.id_to_token.at(token.id).c_str());
                 //}
 
                 break;
             }
 
-            WHISPER_LOG_DEBUG("\n%s: failed to decode with temperature = %.2f\n", __func__, t_cur);
+            WHISPER_LOG_DEBUG("failed to decode with temperature = %.2f", t_cur);
         }
 
         // output results through a user-provided callback
@@ -6231,7 +6264,7 @@ int whisper_full_with_state(
             // [EXPERIMENTAL] Token-level timestamps with DTW
             const auto n_segments_before = state->result_all.size();
 
-            //WHISPER_LOG_DEBUG("prompt_init.size() = %d, prompt.size() = %d, result_len = %d, seek_delta = %d\n", prompt_init.size(), prompt.size(), result_len, seek_delta);
+            //WHISPER_LOG_DEBUG("prompt_init.size() = %d, prompt.size() = %d, result_len = %d, seek_delta = %d", prompt_init.size(), prompt.size(), result_len, seek_delta);
 
             // update prompt_past
             prompt_past.clear();
@@ -6251,7 +6284,7 @@ int whisper_full_with_state(
                 bool speaker_turn_next = false;
 
                 for (int i = 0; i < (int) tokens_cur.size(); i++) {
-                    //printf("%s: %18s %6.3f %18s %6.3f\n", __func__,
+                    //WHISPER_LOG_DEBUG("%18s %6.3f %18s %6.3f",
                     //        ctx->vocab.id_to_token[tokens_cur[i].id].c_str(), tokens_cur[i].p,
                     //        ctx->vocab.id_to_token[tokens_cur[i].tid].c_str(), tokens_cur[i].pt);
 
@@ -6273,14 +6306,13 @@ int whisper_full_with_state(
 
                             if (params.print_realtime) {
                                 if (params.print_timestamps) {
-                                    printf("[%s --> %s]  %s\n", to_timestamp(tt0).c_str(), to_timestamp(tt1).c_str(), text.c_str());
+                                    WHISPER_LOG_DEBUG("[%s --> %s]  %s", to_timestamp(tt0).c_str(), to_timestamp(tt1).c_str(), text.c_str());
                                 } else {
-                                    printf("%s", text.c_str());
-                                    fflush(stdout);
+                                    WHISPER_LOG_DEBUG("%s", text.c_str());
                                 }
                             }
 
-                            //printf("tt0 = %d, tt1 = %d, text = %s, token = %s, token_id = %d, tid = %d\n", tt0, tt1, text.c_str(), ctx->vocab.id_to_token[tokens_cur[i].id].c_str(), tokens_cur[i].id, tokens_cur[i].tid);
+                            //WHISPER_LOG_DEBUG("tt0 = %d, tt1 = %d, text = %s, token = %s, token_id = %d, tid = %d", tt0, tt1, text.c_str(), ctx->vocab.id_to_token[tokens_cur[i].id].c_str(), tokens_cur[i].id, tokens_cur[i].tid);
 
                             result_all.push_back({ tt0, tt1, text, {}, speaker_turn_next });
                             for (int j = i0; j <= i; j++) {
@@ -6320,10 +6352,9 @@ int whisper_full_with_state(
 
                     if (params.print_realtime) {
                         if (params.print_timestamps) {
-                            printf("[%s --> %s]  %s\n", to_timestamp(tt0).c_str(), to_timestamp(tt1).c_str(), text.c_str());
+                            WHISPER_LOG_DEBUG("[%s --> %s]  %s", to_timestamp(tt0).c_str(), to_timestamp(tt1).c_str(), text.c_str());
                         } else {
-                            printf("%s", text.c_str());
-                            fflush(stdout);
+                            WHISPER_LOG_DEBUG("%s", text.c_str());
                         }
                     }
 
@@ -6366,7 +6397,7 @@ int whisper_full_with_state(
             // update audio window
             seek += seek_delta;
 
-            WHISPER_LOG_DEBUG("seek = %d, seek_delta = %d\n", seek, seek_delta);
+            WHISPER_LOG_DEBUG("seek = %d, seek_delta = %d", seek, seek_delta);
         }
     }
 
@@ -6486,12 +6517,12 @@ int whisper_full_parallel(
     ctx->state->t_decode_us /= n_processors;
 
     // print information about the audio boundaries
-    WHISPER_LOG_WARN("\n");
-    WHISPER_LOG_WARN("%s: the audio has been split into %d chunks at the following times:\n", __func__, n_processors);
+    WHISPER_LOG_WARN("");
+    WHISPER_LOG_WARN("the audio has been split into %d chunks at the following times:", n_processors);
     for (int i = 0; i < n_processors - 1; ++i) {
-        WHISPER_LOG_WARN("%s: split %d - %s\n", __func__, (i + 1), to_timestamp(100*((i + 1)*n_samples_per_processor)/WHISPER_SAMPLE_RATE + offset_t).c_str());
+        WHISPER_LOG_WARN("split %d - %s", (i + 1), to_timestamp(100*((i + 1)*n_samples_per_processor)/WHISPER_SAMPLE_RATE + offset_t).c_str());
     }
-    WHISPER_LOG_WARN("%s: the transcription quality may be degraded near these boundaries\n", __func__);
+    WHISPER_LOG_WARN("the transcription quality may be degraded near these boundaries");
 
     return ret;
 }
@@ -6634,7 +6665,7 @@ WHISPER_API const char * whisper_bench_memcpy_str(int n_threads) {
             src[rand() % size] = rand() % 256;
         }
 
-        snprintf(strbuf, sizeof(strbuf), "memcpy: %7.2f GB/s (heat-up)\n", (double) (n*size)/(tsum*1e9));
+        snprintf(strbuf, sizeof(strbuf), "memcpy: %7.2f GB/s (heat-up)", (double) (n*size)/(tsum*1e9));
         s += strbuf;
 
         // needed to prevent the compiler from optimizing the memcpy away
@@ -6669,7 +6700,7 @@ WHISPER_API const char * whisper_bench_memcpy_str(int n_threads) {
             src[rand() % size] = rand() % 256;
         }
 
-        snprintf(strbuf, sizeof(strbuf), "memcpy: %7.2f GB/s ( 1 thread)\n", (double) (n*size)/(tsum*1e9));
+        snprintf(strbuf, sizeof(strbuf), "memcpy: %7.2f GB/s ( 1 thread)", (double) (n*size)/(tsum*1e9));
         s += strbuf;
 
         // needed to prevent the compiler from optimizing the memcpy away
@@ -6721,7 +6752,7 @@ WHISPER_API const char * whisper_bench_memcpy_str(int n_threads) {
 
         tsum += (t1 - t0)*1e-6;
 
-        snprintf(strbuf, sizeof(strbuf), "memcpy: %7.2f GB/s (%2d thread)\n", (double) (n*size)/(tsum*1e9), k);
+        snprintf(strbuf, sizeof(strbuf), "memcpy: %7.2f GB/s (%2d thread)", (double) (n*size)/(tsum*1e9), k);
         s += strbuf;
 
         // needed to prevent the compiler from optimizing the memcpy away
@@ -6733,7 +6764,7 @@ WHISPER_API const char * whisper_bench_memcpy_str(int n_threads) {
         free(dst);
     }
 
-    snprintf(strbuf, sizeof(strbuf), "sum:    %f\n", sum);
+    snprintf(strbuf, sizeof(strbuf), "sum:    %f", sum);
     s += strbuf;
 
     return s.c_str();
@@ -6844,17 +6875,17 @@ WHISPER_API const char * whisper_bench_ggml_mul_mat_str(int n_threads) {
         }
 
         // Q4_0 | Q4_1
-        snprintf(strbuf, sizeof(strbuf), "%4zu x %4zu: Q4_0 %7.1f GFLOPS (%3d runs) | Q4_1 %7.1f GFLOPS (%3d runs)\n",
+        snprintf(strbuf, sizeof(strbuf), "%4zu x %4zu: Q4_0 %7.1f GFLOPS (%3d runs) | Q4_1 %7.1f GFLOPS (%3d runs)",
                 N, N, s_q4_0, n_q4_0, s_q4_1, n_q4_1);
         s += strbuf;
 
         // Q5_0 | Q5_1 | Q8_0
-        snprintf(strbuf, sizeof(strbuf), "%4zu x %4zu: Q5_0 %7.1f GFLOPS (%3d runs) | Q5_1 %7.1f GFLOPS (%3d runs) | Q8_0 %7.1f GFLOPS (%3d runs)\n",
+        snprintf(strbuf, sizeof(strbuf), "%4zu x %4zu: Q5_0 %7.1f GFLOPS (%3d runs) | Q5_1 %7.1f GFLOPS (%3d runs) | Q8_0 %7.1f GFLOPS (%3d runs)",
                 N, N, s_q5_0, n_q5_0, s_q5_1, n_q5_1, s_q8_0, n_q8_0);
         s += strbuf;
 
         // F16 | F32
-        snprintf(strbuf, sizeof(strbuf), "%4zu x %4zu: F16  %7.1f GFLOPS (%3d runs) | F32  %7.1f GFLOPS (%3d runs)\n",
+        snprintf(strbuf, sizeof(strbuf), "%4zu x %4zu: F16  %7.1f GFLOPS (%3d runs) | F32  %7.1f GFLOPS (%3d runs)",
                 N, N, s_fp16, n_fp16, s_fp32, n_fp32);
         s += strbuf;
     }
@@ -6944,7 +6975,7 @@ static void whisper_exp_compute_token_level_timestamps(
     const int n_samples = state.energy.size();
 
     if (n_samples == 0) {
-        WHISPER_LOG_ERROR("%s: no signal data available\n", __func__);
+        WHISPER_LOG_ERROR("no signal data available");
         return;
     }
 
@@ -7025,7 +7056,7 @@ static void whisper_exp_compute_token_level_timestamps(
                 p1--;
             }
 
-            //printf("p0=%d p1=%d t0=%lld t1=%lld\n", p0, p1, tokens[p0].t0, tokens[p1].t1);
+            //printf("p0=%d p1=%d t0=%lld t1=%lld", p0, p1, tokens[p0].t0, tokens[p1].t1);
 
             if (p1 > p0) {
                 double psum = 0.0;
@@ -7033,7 +7064,7 @@ static void whisper_exp_compute_token_level_timestamps(
                     psum += tokens[j].vlen;
                 }
 
-                //printf("analyzing %d - %d, psum = %f\n", p0, p1, psum);
+                //WHISPER_LOG_DEBUG("analyzing %d - %d, psum = %f", p0, p1, psum);
 
                 const double dt = tokens[p1].t1 - tokens[p0].t0;
 
@@ -7156,7 +7187,7 @@ static void whisper_exp_compute_token_level_timestamps(
     //for (int j = 0; j < n; ++j) {
     //    const auto & token = tokens[j];
     //    const auto tt = token.pt > thold_pt && token.ptsum > 0.01 ? whisper_token_to_str(&ctx, token.tid) : "[?]";
-    //    printf("%s: %10s %6.3f %6.3f %6.3f %6.3f %5d %5d '%s'\n", __func__,
+    //    WHISPER_LOG_DEBUG("%s: %10s %6.3f %6.3f %6.3f %6.3f %5d %5d '%s'",
     //            tt, token.p, token.pt, token.ptsum, token.vlen, (int) token.t0, (int) token.t1, whisper_token_to_str(&ctx, token.id));
 
     //    if (tokens[j].id >= whisper_token_eot(&ctx)) {
@@ -7286,6 +7317,7 @@ struct median_filter_user_data {
 };
 
 static void median_filter(struct ggml_tensor * dst , const struct ggml_tensor * a, int ith, int nth, void * userdata) {
+    (void)nth;
     if (ith != 0) {
         return;
     }
@@ -7473,9 +7505,9 @@ static void whisper_exp_compute_token_level_timestamps_dtw(
         auto & segment = state->result_all[i];
         for (auto &t: segment.tokens) {
             const char * tok = whisper_token_to_str(ctx, t.id);
-            fprintf(stderr, "|%s|(%.2f) ", tok, (float)t.t_dtw/100);
+            WHISPER_LOG_ERROR("|%s|(%.2f) ", tok, (float)t.t_dtw/100);
         }
-        fprintf(stderr, "\n");
+        WHISPER_LOG_ERROR("");
     }*/
 
     ggml_free(gctx);
@@ -7554,6 +7586,7 @@ void whisper_notify_new_segements(
             lastToken = itToken;
             const char * tok = whisper_token_to_str(ctx, itToken.id);
             size_t toklen = strlen(tok);
+
             memcpy(pTranscriptionText, tok, toklen);
             memcpy(pWordText, tok, toklen);
             pWordText[toklen] = 0;
@@ -7638,10 +7671,11 @@ static void whisper_log_internal(ggml_log_level level, const char * format, ...)
 }
 
 static void whisper_log_callback_default(ggml_log_level level, const char * text, void * user_data) {
-    (void) level;
-    (void) user_data;
-    fputs(text, stderr);
-    fflush(stderr);
+    (void)level;
+    (void)user_data;
+    FILE *fp = level <= GGML_LOG_LEVEL_WARN ? stderr : stdout;
+    fputs(text, fp);
+    fflush(fp);
 }
 
 int whisper_gpu_preload_from_file(const char *path_model,
