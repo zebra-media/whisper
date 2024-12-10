@@ -7536,6 +7536,9 @@ void whisper_notify_new_segements(
             }
             const char * tok = whisper_token_to_str(ctx, itToken.id);
             size_t toklen = strlen(tok);
+            if (toklen == 0) {
+                continue;
+            }
             words += toklen;
             sizeOfWords += (toklen + 1);
             sizeOfTranscription += toklen;
@@ -7586,6 +7589,9 @@ void whisper_notify_new_segements(
             lastToken = itToken;
             const char * tok = whisper_token_to_str(ctx, itToken.id);
             size_t toklen = strlen(tok);
+            if (toklen == 0) {
+                continue;
+            }
 
             memcpy(pTranscriptionText, tok, toklen);
             memcpy(pWordText, tok, toklen);
