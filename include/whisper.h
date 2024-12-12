@@ -211,6 +211,12 @@ extern "C" {
         uint32_t             value; // Unicode code point or rule ID
     } whisper_grammar_element;
 
+    typedef void (*whisper_pcm_to_mel_callback)(
+            struct whisper_context * ctx,
+            struct whisper_state * state,
+            float delta_progress,
+            void * user_data);
+
     // Various functions for loading a ggml whisper model.
     // Allocate (almost) all memory needed for the model.
     // Return NULL on failure
@@ -281,14 +287,18 @@ extern "C" {
             struct whisper_context * ctx,
                        const float * samples,
                                int   n_samples,
-                               int   n_threads);
+                               int   n_threads,
+            whisper_pcm_to_mel_callback callback,
+                              void * user_data);
 
     WHISPER_API int whisper_pcm_to_mel_with_state(
             struct whisper_context * ctx,
               struct whisper_state * state,
                        const float * samples,
                                int   n_samples,
-                               int   n_threads);
+                               int   n_threads,
+            whisper_pcm_to_mel_callback callback,
+                              void * user_data);
 
     // This can be used to set a custom log mel spectrogram inside the default state of the provided whisper context.
     // Use this instead of whisper_pcm_to_mel() if you want to provide your own log mel spectrogram.

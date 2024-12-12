@@ -2,6 +2,10 @@
 #include "ggml-backend.h"
 #include <vector>
 
+typedef void (*whisper_mel_calculate_callback)(
+        float delta_progress,
+        void * user_data);
+
 struct whisper_mel {
     int n_len_org = 0;
 
@@ -29,6 +33,7 @@ struct whisper_span {
 
 struct whisper_mel_calc {
     virtual ~whisper_mel_calc();
-    virtual whisper_mel calculate(whisper_span<const float> samples, int n_threads) = 0;
+    virtual whisper_mel calculate(whisper_span<const float> samples, int n_threads, whisper_mel_calculate_callback callback,
+                              void * user_data) = 0;
     static whisper_span<const float> hann_window();
 };

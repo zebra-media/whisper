@@ -165,6 +165,8 @@ static void whisper_log_callback_default(ggml_log_level level, const char * text
 #define WHISPER_MAX_DECODERS 8
 #define WHISPER_MAX_NODES 4096
 
+#define MEL_PROGRESS 5
+
 //
 // ggml helpers
 //
@@ -3110,7 +3112,8 @@ struct whisper_mel_data {
 
 void log_mel_spectrogram_worker_thread(int ith, const float * hann, const std::vector<float> & samples,
                                               int n_samples, int n_threads,
-                                              const whisper_filters & filters, whisper_mel_data & mel) {
+                                              const whisper_filters & filters, whisper_mel_data & mel,
+                                              whisper_mel_calculate_callback callback, void * user_data) {
     const auto frame_size = WHISPER_N_FFT;
     const auto frame_step = WHISPER_HOP_LENGTH;
     std::vector<float> fft_in(frame_size * 2, 0.0);
@@ -3166,6 +3169,10 @@ void log_mel_spectrogram_worker_thread(int ith, const float * hann, const std::v
 
             mel.data[j * mel.n_len + i] = sum;
         }
+
+        if(callback) {
+            callback(frame_step * 100. / n_samples, user_data);
+        }
     }
 
     // Otherwise fft_out are all zero
@@ -3183,7 +3190,8 @@ struct mel_calc_cpu : public whisper_mel_calc {
     mel_calc_cpu(ggml_backend_t backend, const whisper_filters & filters) : m_backend(backend), m_filters(filters) {}
 
     // ref: https://github.com/openai/whisper/blob/main/whisper/audio.py#L110-L157
-    whisper_mel calculate(whisper_span<const float> ssamples, int n_threads) override {
+    whisper_mel calculate(whisper_span<const float> ssamples, int n_threads, whisper_mel_calculate_callback callback,
+                              void * user_data) override {
         // Hann window
         const float * hann = global_cache.hann_window;
 
@@ -3230,11 +3238,11 @@ struct mel_calc_cpu : public whisper_mel_calc {
                 workers[iw] = std::thread(
                         log_mel_spectrogram_worker_thread, iw + 1, hann, samples_padded,
                         n_samples + stage_2_pad, n_threads,
-                        std::cref(m_filters), std::ref(mel));
+                        std::cref(m_filters), std::ref(mel), callback, user_data);
             }
 
             // main thread
-            log_mel_spectrogram_worker_thread(0, hann, samples_padded, n_samples + stage_2_pad, n_threads, m_filters, mel);
+            log_mel_spectrogram_worker_thread(0, hann, samples_padded, n_samples + stage_2_pad, n_threads, m_filters, mel, callback, user_data);
 
             for (int iw = 0; iw < n_threads - 1; ++iw) {
                 workers[iw].join();
@@ -3923,13 +3931,29 @@ void whisper_free_params(struct whisper_full_params * params) {
     }
 }
 
-int whisper_pcm_to_mel_with_state(struct whisper_context * ctx, struct whisper_state * state, const float * samples, int n_samples, int n_threads) {
+int whisper_pcm_to_mel_with_state(struct whisper_context * ctx, struct whisper_state * state, const float * samples, int n_samples, int n_threads,
+            whisper_pcm_to_mel_callback callback,
+                              void * user_data) {
     const int64_t t_start_us = ggml_time_us();
+
+    typedef  struct Context{
+        struct whisper_context *ctx;
+        struct whisper_state *state;
+        whisper_pcm_to_mel_callback callback;
+        void * user_data;
+    }Context;
+    Context context = {ctx, state, callback, user_data};
+    whisper_mel_calculate_callback calculate_callback = [](float delta_progress, void* user_data) {
+        Context* pCtx = (Context*)user_data;
+        if(pCtx->callback) {
+            pCtx->callback(pCtx->ctx, pCtx->state, delta_progress, pCtx->user_data);
+        }
+    };
 
     whisper_mel_free(state->mel);
     if (n_samples <= 5 * 60 * WHISPER_SAMPLE_RATE) {
         // calculate mel spectrogram for lengths up to 5 minutes on the most optimal mel calculator
-        state->mel = state->mel_calc->calculate({samples, n_samples}, n_threads);
+        state->mel = state->mel_calc->calculate({samples, n_samples}, n_threads, calculate_callback, &context);
     } else {
         // calcuate mel spectrogram for longer audios on the CPU
         // 1. gpu calculations may use hundreds of megabytes of memory for longer audios so we're being conservative
@@ -3939,7 +3963,7 @@ int whisper_pcm_to_mel_with_state(struct whisper_context * ctx, struct whisper_s
         if (!state->mel_calc_fallback) {
             state->mel_calc_fallback = new mel_calc_cpu(state->backends[0], ctx->model.filters);
         }
-        state->mel = state->mel_calc_fallback->calculate({samples, n_samples}, n_threads);
+        state->mel = state->mel_calc_fallback->calculate({samples, n_samples}, n_threads, calculate_callback, &context);
     }
 
     state->t_mel_us += ggml_time_us() - t_start_us;
@@ -3958,8 +3982,10 @@ int whisper_pcm_to_mel_with_state(struct whisper_context * ctx, struct whisper_s
     return 0;
 }
 
-int whisper_pcm_to_mel(struct whisper_context * ctx, const float * samples, int n_samples, int n_threads) {
-    return whisper_pcm_to_mel_with_state(ctx, ctx->state, samples, n_samples, n_threads);
+int whisper_pcm_to_mel(struct whisper_context * ctx, const float * samples, int n_samples, int n_threads,
+            whisper_pcm_to_mel_callback callback,
+                              void * user_data) {
+    return whisper_pcm_to_mel_with_state(ctx, ctx->state, samples, n_samples, n_threads, callback, user_data);
 }
 
 int whisper_set_mel_with_state(
@@ -5549,8 +5575,28 @@ int whisper_full_with_state(
     result_all.clear();
 
     if (n_samples > 0) {
+        typedef struct pcm_to_mel_context {
+            struct whisper_full_params params;
+            float progress;
+        } pcm_to_mel_context;
+
+        pcm_to_mel_context context = {params, 0};
+
+        whisper_pcm_to_mel_callback callback = [](struct whisper_context * ctx,
+                struct whisper_state * state,
+                float delta_progress,
+                void * user_data){
+            pcm_to_mel_context* pUserData = (pcm_to_mel_context*)user_data;
+            float progress = pUserData->progress;
+            progress += delta_progress;
+            pUserData->progress = progress;
+            if (pUserData->params.progress_callback) {
+                const int progress_cur = int(MEL_PROGRESS * progress / 100);
+                pUserData->params.progress_callback(ctx, state, progress_cur, pUserData->params.progress_callback_user_data);
+            }
+        };
         // compute log mel spectrogram
-        if (whisper_pcm_to_mel_with_state(ctx, state, samples, n_samples, params.n_threads) != 0) {
+        if (whisper_pcm_to_mel_with_state(ctx, state, samples, n_samples, params.n_threads, callback, &context) != 0) {
             WHISPER_LOG_ERROR("failed to compute log mel spectrogram");
             return -2;
         }
@@ -5728,7 +5774,7 @@ int whisper_full_with_state(
     // main loop
     while (true) {
         if (params.progress_callback) {
-            const int progress_cur = (100*(seek - seek_start))/(seek_end - seek_start);
+            const int progress_cur = MEL_PROGRESS + ((100-MEL_PROGRESS)*(seek - seek_start))/(seek_end - seek_start);
 
             params.progress_callback(
                 ctx, state, progress_cur, params.progress_callback_user_data);
